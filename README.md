@@ -1,2 +1,4 @@
-# swe-python
-A sandbox for the spherical shallow water equations on unstructured meshes.
+## `swe-python`
+
+A simple sandbox for unstructured-mesh spherical shallow water equation solvers.
+
