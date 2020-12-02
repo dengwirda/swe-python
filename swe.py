@@ -1,49 +1,51 @@
 
 import os
 import time
-from importlib import import_module
 import numpy as np
-import netCDF4 as nc
 
 import jigsawpy
 import argparse
 
-from ops import init_mesh_sign, eval_cell_div_, eval_edge_hpgf
+from msh import load_mesh, load_flow
+from ops import trsk_mats
 
 
-def swe(path_name):
+def main(name):
     """
-    SWE: a very simple driver to solve the SWE using spherical 
+    SWE: a very simple driver to solve the SWE via spherical 
     MPAS meshes.
 
     """
     # Authors: Darren Engwirda
 
-    mesh = load_mesh(path_name)
-    base = load_defs(path_name, mesh)
+    class base: pass
 
-    mesh = init_mesh_sign(base, mesh)
+    mesh = load_mesh(name)
+    trsk = trsk_mats(mesh)
+    flow = load_flow(name)
 
-    unrm = base.unrm[:, 0]
-    zlev = base.zlev[:, :]
-    hdel = base.zlev[:, 0] - base.zlev[:, 1]
+    cnfg = base()
+    cnfg.iter = 1000
+    cnfg.step = 100.
+    cnfg.freq = 25
+    cnfg.grav = 9.81
 
-    uold = unrm
-    hold = hdel
+    unrm = flow.unrm[0, :, 0]; uold = unrm
+    hdel = flow.hdel[0, :, 0]; hold = hdel
+    zbot = flow.zbot[:]
 
-    for step in range(base.cnfg.iter):
+    for step in range(cnfg.iter):
 
-        plev = np.zeros(                        # p=0 at surf.
-            (mesh.cell.size, 2), dtype=float)
-
-    #-- a TVD-RK2 + FB scheme, a'la ROMS (but with thickness
+    #-- a TVD-RK2 + FB scheme, a'la ROMS (but with variables
     #-- updated via the standard "monotone" TVD-RK approach)
+
+        fcem = flow.frot["edge"][:, 0]
 
         BETA = 1.0 / 3.0
 
-        divh = eval_cell_div_(base, mesh, unrm, hdel)
+        divh = eval_cell_div_(trsk, mesh, unrm, hdel)
 
-        h1st = hdel - 1.0 * base.cnfg.step * divh
+        h1st = hdel - 1.0 * cnfg.step * divh
 
         hbar = hdel * (1.0 - BETA) + h1st * (0.0 + BETA)
 
@@ -51,15 +53,19 @@ def swe(path_name):
                hbar[mesh.edge.cell[:, 0] - 1]
         hpgf = hpgf / mesh.edge.clen
 
-        u1st = unrm - 1.0 * base.cnfg.step * hpgf * base.cnfg.grav
+        uprp = trsk.edge_reco_perp * unrm
+
+        urhs = uprp * fcem + hpgf * cnfg.grav
+
+        u1st = unrm - 1.0 * cnfg.step * urhs
         
 
         htmp = hdel * 0.5 + h1st * 0.5
         utmp = unrm * 0.5 + u1st * 0.5
 
-        divh = eval_cell_div_(base, mesh, u1st, h1st)
+        divh = eval_cell_div_(trsk, mesh, u1st, h1st)
 
-        h2nd = htmp - 0.5 * base.cnfg.step * divh
+        h2nd = htmp - 0.5 * cnfg.step * divh
 
         BETA = 2.0 / 3.0
 
@@ -69,32 +75,24 @@ def swe(path_name):
                hbar[mesh.edge.cell[:, 0] - 1]
         hpgf = hpgf / mesh.edge.clen
 
-        u2nd = utmp - 0.5 * base.cnfg.step * hpgf * base.cnfg.grav
+        uprp = trsk.edge_reco_perp * u1st
+
+        urhs = uprp * fcem + hpgf * cnfg.grav
+
+        u2nd = utmp - 0.5 * cnfg.step * urhs
         
+
+        eta_ = trsk.dual_curl_sums * unrm
+
 
         uold = unrm; unrm = u2nd
         hold = hdel; hdel = h2nd
 
 
+        if (step % cnfg.freq == 0):
 
-    #-- compute total energy, see Ringler et al: A unified approach 
-    #-- to energy conservation and potential vorticity dynamics for
-    #-- arbitrarily structured C-grids
-
-        hmid = hdel[mesh.edge.cell[:, 0] - 1] + \
-               hdel[mesh.edge.cell[:, 1] - 1]
-        hmid = hmid * 0.5
-
-        ke = 0.5 * unrm ** 2 * hmid * mesh.edge.vlen * mesh.edge.clen
-        pe = base.cnfg.grav * (0.5 * hdel - zlev[:, 1]) * mesh.cell.area * hdel
-
-        etot = np.sum(ke) + np.sum(pe)
-        
-        print(etot)
-        
-
-
-        if (step % base.cnfg.freq == 0):
+            check_conserve(cnfg, mesh, unrm, 
+                           hdel, zbot)
 
             mout = jigsawpy.jigsaw_msh_t()
             mout.point = np.zeros(
@@ -108,88 +106,55 @@ def swe(path_name):
             mout.value = hdel[:]
 
             jigsawpy.savevtk(os.path.join(
-                path_name, "out", "flow" + str(step)), mout)
+                "out", "flow" + str(step)), mout)
 
     return
 
 
-def load_defs(path_name, mesh):
+def eval_cell_div_(trsk, mesh, unrm, hdel):
 
-    stem = path_name.replace(os.path.sep, ".")
+#-- eval div(uh) term: finite-volume flux integration around
+#-- cell contours.
 
-    class base: pass
+    icel = mesh.edge.cell[:, 0] - 1
+    jcel = mesh.edge.cell[:, 1] - 1
 
-    defs = base()
-    defs.unrm = getattr(import_module(
-        stem + ".define"), "setunrm")(mesh)
-    defs.zlev = getattr(import_module(
-        stem + ".define"), "setzlev")(mesh)
-    defs.cnfg = getattr(import_module(
-        stem + ".define"), "setcnfg")(mesh)
+    if True:
+ 
+        hmid = (hdel[icel] + hdel[jcel]) * 0.5
+    
+    else:
 
-    return defs
+        wind = unrm >= 0.
+        hmid = hdel[jcel]
+        hmid[wind] = hdel[icel[wind]]
+
+    divh = trsk.cell_flux_sums * (unrm * hmid)
+
+    return divh / mesh.cell.area
 
 
-def load_mesh(path_name):
+def check_conserve(cnfg, mesh, unrm, hdel, 
+                   zbot):
 
-    class base: pass
+#-- calc. energy, etc, see Ringler et al: A unified approach 
+#-- to energy conservation and potential vorticity dynamics 
+#-- for arbitrarily structured C-grids, J. Comp. Phys.: 229 
+#-- (9), 3065-3090, 2010
 
-    data = nc.Dataset(os.path.join(
-        path_name, "base_mesh.nc"), "r")
+    hmid = hdel[mesh.edge.cell[:, 0] - 1] + \
+           hdel[mesh.edge.cell[:, 1] - 1]
+    hmid = hmid * 0.5
 
-    mesh = base()
-    mesh.rsph = float(data.sphere_radius)
+    pe = cnfg.grav * (+0.5 * hdel - zbot) * \
+         mesh.cell.area * hdel
 
-    mesh.cell = base()
-    mesh.cell.size = int(data.dimensions["nCells"].size)
-    mesh.cell.xpos = np.array(data.variables["xCell"])
-    mesh.cell.ypos = np.array(data.variables["yCell"])
-    mesh.cell.zpos = np.array(data.variables["zCell"])
-    mesh.cell.xlon = np.array(data.variables["lonCell"])
-    mesh.cell.ylat = np.array(data.variables["latCell"])
-    mesh.cell.area = np.array(data.variables["areaCell"])   
-    mesh.cell.vert = \
-        np.array(data.variables["verticesOnCell"])
-    mesh.cell.edge = \
-        np.array(data.variables["edgesOnCell"])
-    mesh.cell.topo = \
-        np.array(data.variables["nEdgesOnCell"])
+    ke = +0.5 * unrm ** 2 * hmid * \
+         mesh.edge.vlen * mesh.edge.clen
 
-    mesh.edge = base()
-    mesh.edge.size = int(data.dimensions["nEdges"].size)
-    mesh.edge.xpos = np.array(data.variables["xEdge"])
-    mesh.edge.ypos = np.array(data.variables["yEdge"])
-    mesh.edge.zpos = np.array(data.variables["zEdge"])
-    mesh.edge.xlon = np.array(data.variables["lonEdge"])
-    mesh.edge.ylat = np.array(data.variables["latEdge"])
-    mesh.edge.vlen = np.array(data.variables["dvEdge"])
-    mesh.edge.clen = np.array(data.variables["dcEdge"])
-    mesh.edge.vert = \
-        np.array(data.variables["verticesOnEdge"])
-    mesh.edge.cell = \
-        np.array(data.variables["cellsOnEdge"])
-    mesh.edge.edge = \
-        np.array(data.variables["edgesOnEdge"])
-    mesh.edge.topo = \
-        np.array(data.variables["nEdgesOnEdge"])
+    print(np.sum(ke) + np.sum(pe))
 
-    mesh.vert = base()
-    mesh.vert.size = int(data.dimensions["nVertices"].size)
-    mesh.vert.xpos = np.array(data.variables["xVertex"])
-    mesh.vert.ypos = np.array(data.variables["yVertex"])
-    mesh.vert.zpos = np.array(data.variables["zVertex"])
-    mesh.vert.xlon = np.array(data.variables["lonVertex"])
-    mesh.vert.ylat = np.array(data.variables["latVertex"])
-    mesh.vert.area = \
-        np.array(data.variables["areaTriangle"])
-    mesh.vert.kite = \
-        np.array(data.variables["kiteAreasOnVertex"])
-    mesh.vert.edge = \
-        np.array(data.variables["edgesOnVertex"])
-    mesh.vert.cell = \
-        np.array(data.variables["cellsOnVertex"])
-
-    return mesh
+    return
 
 
 if (__name__ == "__main__"):
@@ -198,9 +163,9 @@ if (__name__ == "__main__"):
         formatter_class=argparse.RawTextHelpFormatter)
 
     parser.add_argument(
-        "--path-name", dest="path_name", type=str,
-        required=True, help="Path to user-def. run-dir.")
+        "--mpas-file", dest="mpas_file", type=str,
+        required=True, help="Path to user MPAS file.")
 
     args = parser.parse_args()
 
-    swe(path_name=args.path_name)
+    main(name=args.mpas_file)
