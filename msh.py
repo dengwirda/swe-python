@@ -123,6 +123,12 @@ def load_flow(name):
     nlev = int(data.dimensions["nVertLevels"].size)
 
     flow = base()
+    
+    if ("config_gravity" in data.ncattrs()):
+        flow.grav = float(data.config_gravity)
+    else:
+        flow.grav = 9.80616
+
     flow.hh_cell = np.zeros((step, ncel, nlev), dtype=float)
     
     flow.zb_cell = np.zeros((ncel), dtype=float)

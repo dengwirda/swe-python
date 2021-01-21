@@ -23,8 +23,7 @@ def main(args):
     cnfg.iter = args.iteration
     cnfg.step = args.time_step
     cnfg.freq = args.save_freq
-    cnfg.grav = 9.80616
-
+    
     name = args.mpas_file
     path, file = os.path.split(name)
     save = os.path.join(path, "out_" + file)
@@ -92,11 +91,19 @@ def main(args):
                   hb_cell[mesh.edge.cell[:, 0] - 1]
         gp_edge = gp_edge / mesh.edge.clen
 
-        #ke_edge = mesh.edge.area * .50 * u1_edge ** 2
-        ke_edge = mesh.edge.vlen * 
+        '''
+        UU_vert = vert_reco(mesh, uu_edge)
+        ke_dual = .5 * np.sum(UU_vert ** 2, axis=1)
+
+        ke_cell = trsk.cell_kite_sums * ke_dual
+        ke_cell = ke_cell / mesh.cell.area
+        '''
+
+        ke_edge = mesh.edge.vlen * \
                   mesh.edge.clen * .25 * uu_edge ** 2
         ke_cell = trsk.cell_edge_sums * ke_edge
         ke_cell = ke_cell / mesh.cell.area
+
 
         gk_edge = ke_cell[mesh.edge.cell[:, 1] - 1] - \
                   ke_cell[mesh.edge.cell[:, 0] - 1]
@@ -128,7 +135,7 @@ def main(args):
         
         qh_edge = perp_reco(mesh, uh_edge, pv_edge)
        
-        ur_edge = gp_edge * cnfg.grav + gk_edge + qh_edge
+        ur_edge = gp_edge * flow.grav + gk_edge + qh_edge
 
         u1_edge = uu_edge - 1.0 * cnfg.step * ur_edge
 
@@ -159,11 +166,19 @@ def main(args):
                   hb_cell[mesh.edge.cell[:, 0] - 1]
         gp_edge = gp_edge / mesh.edge.clen
 
-       #ke_edge = mesh.edge.area * .50 * u1_edge ** 2
-        ke_edge = mesh.edge.vlen * 
+        '''
+        UU_vert = vert_reco(mesh, u1_edge)
+        ke_dual = .5 * np.sum(UU_vert ** 2, axis=1)
+
+        ke_cell = trsk.cell_kite_sums * ke_dual
+        ke_cell = ke_cell / mesh.cell.area
+        '''
+
+        ke_edge = mesh.edge.vlen * \
                   mesh.edge.clen * .25 * u1_edge ** 2
         ke_cell = trsk.cell_edge_sums * ke_edge
         ke_cell = ke_cell / mesh.cell.area
+
 
         gk_edge = ke_cell[mesh.edge.cell[:, 1] - 1] - \
                   ke_cell[mesh.edge.cell[:, 0] - 1]
@@ -195,7 +210,7 @@ def main(args):
 
         qh_edge = perp_reco(mesh, uh_edge, pv_edge)
        
-        ur_edge = gp_edge * cnfg.grav + gk_edge + qh_edge
+        ur_edge = gp_edge * flow.grav + gk_edge + qh_edge
 
         u2_edge = ut_edge - 0.5 * cnfg.step * ur_edge
 
@@ -223,6 +238,8 @@ def main(args):
                 np.reshape(rv_cell, (mesh.cell.size, 1)))
             xnow["ke_cell"] = (("nCells", "nVertLevels"), 
                 np.reshape(ke_cell, (mesh.cell.size, 1)))
+            xnow["ke_dual"] = (("nCells", "nVertLevels"), 
+                np.reshape(ke_cell, (mesh.cell.size, 1)))
 
             xout.append(xnow)
 
@@ -237,7 +254,7 @@ def main(args):
     data.attrs["on_a_sphere"] = "YES"
     data.attrs["sphere_radius"] = mesh.rsph
     data.attrs["is_periodic"] = "NO"
-    data.attrs["mesh_id"] = "swe-python"
+    data.attrs["source"] = "swe-python"
     data["lonCell"] = (("nCells"), mesh.cell.xlon)
     data["latCell"] = (("nCells"), mesh.cell.ylat)
     data["xCell"] = (("nCells"), mesh.cell.xpos)
@@ -287,6 +304,32 @@ def main(args):
         save, format="NETCDF3_64BIT_OFFSET")
 
     return
+
+
+def vert_reco(mesh, ff_edge):
+
+    FF_vert = np.zeros((mesh.vert.size, 3), dtype=float)
+
+    fl_edge = mesh.edge.clen * ff_edge
+
+    for edge in range(3):
+
+        eidx = mesh.vert.edge[:, edge]
+
+        sign = mesh.dual.sign[:, edge]
+
+        xdel = mesh.edge.xpos[eidx] - \
+               mesh.vert.xpos
+        ydel = mesh.edge.ypos[eidx] - \
+               mesh.vert.ypos
+        zdel = mesh.edge.zpos[eidx] - \
+               mesh.vert.zpos
+
+        FF_vert[:, 0] += xdel * sign * fl_edge[eidx]
+        FF_vert[:, 1] += ydel * sign * fl_edge[eidx]
+        FF_vert[:, 2] += zdel * sign * fl_edge[eidx]
+
+    return FF_vert
 
 
 def perp_reco(mesh, uh_edge, pv_edge):

@@ -47,6 +47,7 @@ def init(name, save, rsph):
 
     init = xarray.open_dataset(name)
     init.attrs.update({"sphere_radius": mesh.rsph})
+    init.attrs.update({"config_gravity": grav})
     init["xCell"] = (("nCells"), mesh.cell.xpos)
     init["yCell"] = (("nCells"), mesh.cell.ypos)
     init["zCell"] = (("nCells"), mesh.cell.zpos)

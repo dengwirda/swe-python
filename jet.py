@@ -1,4 +1,6 @@
 
+from distutils.util import strtobool
+
 import numpy as np
 from scipy.sparse.linalg import spsolve
 from scipy.integrate import quadrature
@@ -63,14 +65,19 @@ def init(name, save, rsph=1.E+0, pert=True):
 #-- shallow-water equations, Tellus A: Dynamic Meteorology & 
 #-- Oceanography, 56:5, 429-440
 
+#-- this routine returns a scaled version of the Galewsky et 
+#-- al flow in cases where RSPH != 6371220m, with {u, h, g}
+#-- multiplied by RSPH / 6371220m. This preserves (vortical)
+#-- dynamics across arbitrarily sized spheres.
+
     erot = 7.292E-05            # Earth's omega
-    grav = 9.80616              # gravity
+    grav = 9.80616 * (rsph / 6371220.0)     # gravity
 
     lat0 = np.pi / 7.0          # jet lat width
     lat1 = np.pi / 2.0 - lat0
 
-    umid = 8.000E+01            # jet max speed
-    hbar = 1.000E+04            # mean layer hh
+    umid = 8.000E+01 * (rsph / 6371220.0)   # jet max speed
+    hbar = 1.000E+04 * (rsph / 6371220.0)   # mean layer hh
 
     uamp = umid / np.exp(-4. / (lat1 - lat0) ** 2)
 
@@ -133,7 +140,7 @@ def init(name, save, rsph=1.E+0, pert=True):
     lat2 = np.pi / 4.               # perturbation constants
     lon2 = np.pi / 1.
 
-    hmul = 120.0
+    hmul = 120.0 * (rsph / 6371220.0)
     eta1 = 1. / 3.
     eta2 = 1. / 15.
 
@@ -157,6 +164,7 @@ def init(name, save, rsph=1.E+0, pert=True):
 
     init = xarray.open_dataset(name)
     init.attrs.update({"sphere_radius": mesh.rsph})
+    init.attrs.update({"config_gravity": grav})
     init["xCell"] = (("nCells"), mesh.cell.xpos)
     init["yCell"] = (("nCells"), mesh.cell.ypos)
     init["zCell"] = (("nCells"), mesh.cell.zpos)
@@ -220,7 +228,8 @@ if (__name__ == "__main__"):
         required=True, help="IC's filename to write.")
 
     parser.add_argument(
-        "--with-pert", dest="with_pert", type=bool,
+        "--with-pert", dest="with_pert", 
+        type=lambda x: bool(strtobool(x)),
         required=True, help="True to add hh perturb.")
 
     parser.add_argument(
