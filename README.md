@@ -49,5 +49,5 @@ For example, to build + run the barotropic jet test case using the CVT-optimised
     --save-freq=270
     --operators="TRSK-CV"
 
-Output is saved to the 'out_jet_cvt_7ref.nc' file, which can be opened for visualisation 
+Output is saved to the `out_jet_cvt_7ref.nc` file, which can be opened for visualisation 
 in paraview.
