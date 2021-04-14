@@ -8,7 +8,7 @@ from scipy.integrate import quadrature
 import xarray
 import argparse
 
-from msh import load_mesh
+from msh import load_mesh, cell_quad, dual_quad
 from ops import trsk_mats
 
 
@@ -34,15 +34,14 @@ def init(name, save, rsph=1.E+0, pert=True):
     """
     INIT: Form SWE initial conditions for the barotropic jet
     case.
-    
+
     Adds initial conditions to the MPAS mesh file NAME.nc,
     with the output IC's written to SAVE.nc.
 
-    If PERT=TRUE, adds a perturbation to the layer thickness 
+    If PERT=TRUE, adds a perturbation to the layer thickness
 
     """
-    # Authors: Darren Engwirda, Sara Calandrini,
-    #          Mark Petersen
+    # Authors: Darren Engwirda, Sara Calandrini
 
 #------------------------------------ load an MPAS mesh file
 
@@ -60,12 +59,12 @@ def init(name, save, rsph=1.E+0, pert=True):
 
     print("Build streamfunction")
 
-#-- J. Galewsky, R.K. Scott & L.M. Polvani (2004) An initial 
-#-- value problem for testing numerical models of the global 
-#-- shallow-water equations, Tellus A: Dynamic Meteorology & 
+#-- J. Galewsky, R.K. Scott & L.M. Polvani (2004) An initial
+#-- value problem for testing numerical models of the global
+#-- shallow-water equations, Tellus A: Dynamic Meteorology &
 #-- Oceanography, 56:5, 429-440
 
-#-- this routine returns a scaled version of the Galewsky et 
+#-- this routine returns a scaled version of the Galewsky et
 #-- al flow in cases where RSPH != 6371220m, with {u, h, g}
 #-- multiplied by RSPH / 6371220m. This preserves (vortical)
 #-- dynamics across arbitrarily sized spheres.
@@ -85,18 +84,33 @@ def init(name, save, rsph=1.E+0, pert=True):
 
     vpsi = np.zeros(
         mesh.vert.size, dtype=np.float64)
+    cpsi = np.zeros(
+        mesh.cell.size, dtype=np.float64)
 
-    for node in range(mesh.vert.size):
-        alat = mesh.vert.ylat[node]
+    for vert in range(mesh.vert.size):
+        alat = mesh.vert.ylat[vert]
         if (alat >= lat0 and alat < lat1):
-            vpsi[node], _ = quadrature(
+            vpsi[vert], _ = quadrature(
                 ujet, lat0, alat, miniter=8,
                 args=(lat0, lat1, uamp, mesh.rsph))
 
     vpsi[mesh.vert.ylat[:] >= lat1] = np.min(vpsi)
 
+    print("--> done: vert!")
+
+    for cell in range(mesh.cell.size):
+        alat = mesh.cell.ylat[cell]
+        if (alat >= lat0 and alat < lat1):
+            cpsi[cell], _ = quadrature(
+                ujet, lat0, alat, miniter=8,
+                args=(lat0, lat1, uamp, mesh.rsph))
+
+    cpsi[mesh.cell.ylat[:] >= lat1] = np.min(cpsi)
+
+    print("--> done: cell!")
+
 #-- form velocity on edges from streamfunction: ensures u is
-#-- div-free in a discrete sense. 
+#-- div-free in a discrete sense.
 
 #-- this comes from taking div(*) of the momentum equations,
 #-- see: H. Weller, J. Thuburn, C.J. Cotter (2012):
@@ -106,9 +120,10 @@ def init(name, save, rsph=1.E+0, pert=True):
     print("Calc. velocity field")
 
     unrm = trsk.edge_grad_perp * vpsi * -1.00
-    
-    uprp = trsk.edge_reco_perp * unrm * -1.00
-    
+
+   #uprp = trsk.edge_lsqr_perp * unrm * -1.00
+    uprp = trsk.edge_grad_norm * cpsi * -1.00
+
     udiv = trsk.cell_flux_sums * unrm
 
     print("--> max(abs(unrm)):", np.max(unrm))
@@ -151,7 +166,7 @@ def init(name, save, rsph=1.E+0, pert=True):
 
     hdel = hdel + float(pert) * hadd
 
-#-- inject mesh with IC.'s and write output MPAS netCDF file  
+#-- inject mesh with IC.'s and write output MPAS netCDF file
 
     print("Output written to:", save)
 
@@ -173,7 +188,7 @@ def init(name, save, rsph=1.E+0, pert=True):
     init["xEdge"] = (("nEdges"), mesh.edge.xpos)
     init["yEdge"] = (("nEdges"), mesh.edge.ypos)
     init["zEdge"] = (("nEdges"), mesh.edge.zpos)
-    init["dvEdge"] = (("nEdges"), mesh.edge.vlen)    
+    init["dvEdge"] = (("nEdges"), mesh.edge.vlen)
     init["dcEdge"] = (("nEdges"), mesh.edge.clen)
 
     init["xVertex"] = (("nVertices"), mesh.vert.xpos)
@@ -193,18 +208,18 @@ def init(name, save, rsph=1.E+0, pert=True):
     init["streamfunction"] = (("nVertices"), vpsi)
     init["velocityTotals"] = (("nVertices"), vvel)
     init["vorticity"] = (
-        ("nVertices"), 
+        ("nVertices"),
         (trsk.dual_curl_sums * unrm) / mesh.vert.area)
 
     init["tracers"] = (
-        ("Time", "nCells", "nVertLevels", "nTracers"), 
+        ("Time", "nCells", "nVertLevels", "nTracers"),
         np.zeros((1, mesh.cell.size, 1, 1)))
 
-    init["fCell"] = (("nCells"), 
+    init["fCell"] = (("nCells"),
         2.00E+00 * erot * np.sin(mesh.cell.ylat))
-    init["fEdge"] = (("nEdges"), 
+    init["fEdge"] = (("nEdges"),
         2.00E+00 * erot * np.sin(mesh.edge.ylat))
-    init["fVertex"] = (("nVertices"), 
+    init["fVertex"] = (("nVertices"),
         2.00E+00 * erot * np.sin(mesh.vert.ylat))
 
     print(init)
@@ -222,13 +237,13 @@ if (__name__ == "__main__"):
     parser.add_argument(
         "--mesh-file", dest="mesh_file", type=str,
         required=True, help="Path to user mesh file.")
-    
+
     parser.add_argument(
         "--init-file", dest="init_file", type=str,
         required=True, help="IC's filename to write.")
 
     parser.add_argument(
-        "--with-pert", dest="with_pert", 
+        "--with-pert", dest="with_pert",
         type=lambda x: bool(strtobool(x)),
         required=True, help="True to add hh perturb.")
 
