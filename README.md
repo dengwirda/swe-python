@@ -14,8 +14,8 @@ Solver output is saved to an MPAS-format netCDF file that can be visualised via
 paraview.
 
 Input files for various cases can be built from MPAS-format mesh files using the 
-following utilities. A set of example icosahedral grids are attached to releases
-of this repository. 
+following utilities. A set of example icosahedral grids are attached to 
+[releases](https://github.com/dengwirda/swe-python/releases) of this repository. 
 
 The barotopic jet of Galewesky et al:
 
