@@ -2,11 +2,12 @@
 import os
 import time
 import numpy as np
-import xarray
+import netCDF4 as nc
 import argparse
 
 from msh import load_mesh, load_flow
 from ops import trsk_mats
+from scipy.sparse import csr_matrix, spdiags
 
 
 class base: pass
@@ -17,8 +18,9 @@ tcpu.computeKE = 0.0E+00
 tcpu.computePV = 0.0E+00
 tcpu.advect_PV = 0.0E+00
 tcpu.upwind_PV = 0.0E+00
+tcpu.computeD2 = 0.0E+00
 
-def main(cnfg):
+def swe(cnfg):
     """
     SWE: solve the nonlinear SWE on generalised MPAS meshes.
 
@@ -31,27 +33,54 @@ def main(cnfg):
     cnfg.integrate = cnfg.integrate.upper()
     cnfg.operators = cnfg.operators.upper()
     cnfg.pv_scheme = cnfg.pv_scheme.upper()
+    cnfg.ke_scheme = cnfg.ke_scheme.upper()
 
     name = cnfg.mpas_file
     path, file = os.path.split(name)
     save = os.path.join(path, "out_" + file)
 
+    # load mesh + init. conditions
     mesh = load_mesh(name)
     flow = load_flow(name)
 
-    trsk = trsk_mats(mesh)
+    init_file(mesh, cnfg, flow, save)
 
     u0_edge = flow.uu_edge[0, :, 0]
     uu_edge = u0_edge
     h0_cell = flow.hh_cell[0, :, 0]
     hh_cell = h0_cell
 
+    # make cell-based "land" masks
+    mesh.cell.mask = hh_cell <= 0.5
+
+    mesh.edge.mask = np.logical_or.reduce((
+        mesh.cell.mask[mesh.edge.cell[:, 0] - 1],
+        mesh.cell.mask[mesh.edge.cell[:, 1] - 1]
+    ))
+
+    mesh.vert.mask = np.logical_or.reduce((
+        mesh.cell.mask[mesh.vert.cell[:, 0] - 1],
+        mesh.cell.mask[mesh.vert.cell[:, 1] - 1],
+        mesh.cell.mask[mesh.vert.cell[:, 2] - 1]
+    ))
+
+    hh_cell[mesh.cell.mask] = +0.0
+    uu_edge[mesh.edge.mask] = +0.0
+
+    # set sparse spatial operators
+    trsk = trsk_mats(mesh)
+
+    # remap fedge is more accurate?
+    flow.ff_edge = trsk.edge_stub_sums * flow.ff_vert
+    flow.ff_edge = \
+        (flow.ff_edge / mesh.edge.area)
+
     kp_sums = np.zeros((
         cnfg.iteration // cnfg.stat_freq + 1), dtype=np.float64)
     pv_sums = np.zeros((
         cnfg.iteration // cnfg.stat_freq + 1), dtype=np.float64)
 
-    ttic = time.time(); xout = []; next = 0
+    ttic = time.time(); xout = []; next = 0; freq = 0
 
     for step in range(cnfg.iteration + 1):
 
@@ -83,21 +112,19 @@ def main(cnfg):
 
         if (step % cnfg.save_freq == 0):
 
-            xnow = xarray.Dataset()
-            xnow["uu_edge"] = (("nEdges", "nVertLevels"),
-                np.reshape(uu_edge, (mesh.edge.size, 1)))
-            xnow["hh_cell"] = (("nCells", "nVertLevels"),
-                np.reshape(hh_cell, (mesh.cell.size, 1)))
-            xnow["pv_dual"] = (("nVertices", "nVertLevels"),
-                np.reshape(pv_dual, (mesh.vert.size, 1)))
-            xnow["pv_cell"] = (("nCells", "nVertLevels"),
-                np.reshape(pv_cell, (mesh.cell.size, 1)))
-            xnow["rv_dual"] = (("nVertices", "nVertLevels"),
-                np.reshape(rv_dual, (mesh.vert.size, 1)))
-            xnow["rv_cell"] = (("nCells", "nVertLevels"),
-                np.reshape(rv_cell, (mesh.cell.size, 1)))
-            xnow["ke_cell"] = (("nCells", "nVertLevels"),
-                np.reshape(ke_cell, (mesh.cell.size, 1)))
+            data = nc.Dataset(
+                save, "a", format="NETCDF3_64BIT_OFFSET")
+
+            data.variables["uu_edge"][freq, :, :] = \
+                np.reshape(uu_edge, (1, mesh.edge.size, 1))
+            data.variables["hh_cell"][freq, :, :] = \
+                np.reshape(hh_cell, (1, mesh.cell.size, 1))
+            data.variables["pv_cell"][freq, :, :] = \
+                np.reshape(pv_cell, (1, mesh.cell.size, 1))
+            data.variables["rv_cell"][freq, :, :] = \
+                np.reshape(rv_cell, (1, mesh.cell.size, 1))
+            data.variables["ke_cell"][freq, :, :] = \
+                np.reshape(ke_cell, (1, mesh.cell.size, 1))
 
             ux_cell = trsk.cell_lsqr_xnrm * uu_edge
             uy_cell = trsk.cell_lsqr_ynrm * uu_edge
@@ -110,19 +137,25 @@ def main(cnfg):
             uz_dual = trsk.dual_kite_sums * uz_cell
             uz_dual = uz_dual / mesh.vert.area
 
-            xnow["ux_dual"] = (("nVertices", "nVertLevels"),
-                np.reshape(ux_dual, (mesh.vert.size, 1)))
-            xnow["uy_dual"] = (("nVertices", "nVertLevels"),
-                np.reshape(uy_dual, (mesh.vert.size, 1)))
-            xnow["uz_dual"] = (("nVertices", "nVertLevels"),
-                np.reshape(uz_dual, (mesh.vert.size, 1)))
+            data.variables["pv_dual"][freq, :, :] = \
+                np.reshape(pv_dual, (1, mesh.vert.size, 1))
+            data.variables["rv_dual"][freq, :, :] = \
+                np.reshape(rv_dual, (1, mesh.vert.size, 1))
+            data.variables["ux_dual"][freq, :, :] = \
+                np.reshape(ux_dual, (1, mesh.vert.size, 1))
+            data.variables["uy_dual"][freq, :, :] = \
+                np.reshape(uy_dual, (1, mesh.vert.size, 1))
+            data.variables["uz_dual"][freq, :, :] = \
+                np.reshape(uz_dual, (1, mesh.vert.size, 1))
 
             dh_cell = hh_cell - h0_cell
 
-            xnow["dh_cell"] = (("nCells", "nVertLevels"),
-                np.reshape(dh_cell, (mesh.cell.size, 1)))
+            data.variables["dh_cell"][freq, :, :] = \
+                np.reshape(dh_cell, (1, mesh.cell.size, 1))
 
-            xout.append(xnow)
+            data.close()
+
+            freq = freq + 1
 
     ttoc = time.time()
 
@@ -134,86 +167,173 @@ def main(cnfg):
     print("tcpu.upwind_PV:", tcpu.upwind_PV)    
     print("tcpu.advect_PV:", tcpu.advect_PV)
 
-    data = xarray.Dataset()
-    data = xarray.merge(
-        (data, xarray.concat(xout, dim="Time")))
-    data.attrs["on_a_sphere"] = "YES"
-    data.attrs["sphere_radius"] = mesh.rsph
-    data.attrs["is_periodic"] = "NO"
-    data.attrs["source"] = "swe-python"
+    data = nc.Dataset(
+        save, "a", format="NETCDF3_64BIT_OFFSET")
 
-    data["kk_sums"] = (("nSteps"), kp_sums)
-    data["pv_sums"] = (("nSteps"), pv_sums)
-
-    data["lonCell"] = (("nCells"), mesh.cell.xlon)
-    data["latCell"] = (("nCells"), mesh.cell.ylat)
-    data["xCell"] = (("nCells"), mesh.cell.xpos)
-    data["yCell"] = (("nCells"), mesh.cell.ypos)
-    data["zCell"] = (("nCells"), mesh.cell.zpos)
-    data["areaCell"] = (("nCells"), mesh.cell.area)
-    data["verticesOnCell"] = (
-        ("nCells", "maxEdges"), mesh.cell.vert)
-    data["edgesOnCell"] = (
-        ("nCells", "maxEdges"), mesh.cell.edge)
-    data["cellsOnCell"] = (
-        ("nCells", "maxEdges"), mesh.cell.cell)
-    data["nEdgesOnCell"] = (("nCells"), mesh.cell.topo)
-
-    data["lonEdge"] = (("nEdges"), mesh.edge.xlon)
-    data["latEdge"] = (("nEdges"), mesh.edge.ylat)
-    data["xEdge"] = (("nEdges"), mesh.edge.xpos)
-    data["yEdge"] = (("nEdges"), mesh.edge.ypos)
-    data["zEdge"] = (("nEdges"), mesh.edge.zpos)
-    data["dvEdge"] = (("nEdges"), mesh.edge.vlen)
-    data["dcEdge"] = (("nEdges"), mesh.edge.clen)
-    data["verticesOnEdge"] = (
-        ("nEdges", "TWO"), mesh.edge.vert)
-    data["weightsOnEdge"] = (
-        ("nEdges", "maxEdges2"), mesh.edge.wmul)
-    data["cellsOnEdge"] = (
-        ("nEdges", "TWO"), mesh.edge.cell)
-    data["edgesOnEdge"] = (
-        ("nEdges", "maxEdges2"), mesh.edge.edge)
-    data["nEdgesOnEdge"] = (("nEdges"), mesh.edge.topo)
-
-    data["lonVertex"] = (("nVertices"), mesh.vert.xlon)
-    data["latVertex"] = (("nVertices"), mesh.vert.ylat)
-    data["xVertex"] = (("nVertices"), mesh.vert.xpos)
-    data["yVertex"] = (("nVertices"), mesh.vert.ypos)
-    data["zVertex"] = (("nVertices"), mesh.vert.zpos)
-    data["areaTriangle"] = (
-        ("nVertices"), mesh.vert.area)
-    data["kiteAreasOnVertex"] = (
-        ("nVertices", "vertexDegree"), mesh.vert.kite)
-    data["edgesOnVertex"] = (
-        ("nVertices", "vertexDegree"), mesh.vert.edge)
-    data["cellsOnVertex"] = (
-        ("nVertices", "vertexDegree"), mesh.vert.cell)
-
-    data.to_netcdf(
-        save, format="NETCDF3_64BIT_OFFSET")
+    data.variables["kk_sums"][:] = kp_sums
+    data.variables["pv_sums"][:] = pv_sums
 
     return
+
+
+def init_file(mesh, cnfg, flow, save):
+
+    data = nc.Dataset(
+        save, "w", format="NETCDF3_64BIT_OFFSET")
+    data.on_a_sphere = "YES"
+    data.sphere_radius = mesh.rsph
+    data.is_periodic = "NO"
+    data.source = "swe-python"
+
+    data.createDimension(
+        "Time", cnfg.iteration // cnfg.save_freq + 1)
+    data.createDimension(
+        "Step", cnfg.iteration // cnfg.stat_freq + 1)
+
+    data.createDimension("TWO", 2)
+    data.createDimension("nCells", mesh.cell.size)
+    data.createDimension("nEdges", mesh.edge.size)
+    data.createDimension("nVertices", mesh.vert.size)
+    data.createDimension("nVertLevels", 1)
+    data.createDimension("maxEdges", np.max(mesh.cell.topo) * 1)
+    data.createDimension("maxEdges2", np.max(mesh.cell.topo) * 2)
+    data.createDimension("vertexDegree", 3)
+
+    data.createVariable("lonCell", "f8", ("nCells"))
+    data["lonCell"][:] = mesh.cell.xlon
+    data.createVariable("latCell", "f8", ("nCells"))
+    data["latCell"][:] = mesh.cell.ylat
+    data.createVariable("xCell", "f8", ("nCells"))
+    data["xCell"][:] = mesh.cell.xpos
+    data.createVariable("yCell", "f8", ("nCells"))
+    data["yCell"][:] = mesh.cell.ypos
+    data.createVariable("zCell", "f8", ("nCells"))
+    data["zCell"][:] = mesh.cell.zpos
+    data.createVariable("areaCell", "f8", ("nCells"))
+    data["areaCell"][:] = mesh.cell.area
+    data.createVariable(
+        "verticesOnCell", "i4", ("nCells", "maxEdges"))
+    data["verticesOnCell"][:, :] = mesh.cell.vert
+    data.createVariable(
+        "edgesOnCell", "i4", ("nCells", "maxEdges"))
+    data["edgesOnCell"][:, :] = mesh.cell.edge
+    data.createVariable(
+        "cellsOnCell", "i4", ("nCells", "maxEdges"))
+    data["cellsOnCell"][:, :] = mesh.cell.cell
+    data.createVariable("nEdgesOnCell", "i4", ("nCells"))
+    data["nEdgesOnCell"][:] = mesh.cell.topo
+
+    data.createVariable("lonEdge", "f8", ("nEdges"))
+    data["lonEdge"][:] = mesh.edge.xlon
+    data.createVariable("latEdge", "f8", ("nEdges"))
+    data["latEdge"][:] = mesh.edge.ylat
+    data.createVariable("xEdge", "f8", ("nEdges"))
+    data["xEdge"][:] = mesh.edge.xpos
+    data.createVariable("yEdge", "f8", ("nEdges"))
+    data["yEdge"][:] = mesh.edge.ypos
+    data.createVariable("zEdge", "f8", ("nEdges"))
+    data["zEdge"][:] = mesh.edge.zpos
+    data.createVariable("dvEdge", "f8", ("nEdges"))
+    data["dvEdge"][:] = mesh.edge.vlen
+    data.createVariable("dcEdge", "f8", ("nEdges"))
+    data["dcEdge"][:] = mesh.edge.clen
+    data.createVariable(
+        "verticesOnEdge", "i4", ("nEdges", "TWO"))
+    data["verticesOnEdge"][:, :] = mesh.edge.vert
+    data.createVariable(
+        "weightsOnEdge", "f8", ("nEdges", "maxEdges2"))
+    data["weightsOnEdge"][:, :] = mesh.edge.wmul
+    data.createVariable(
+        "cellsOnEdge", "i4", ("nEdges", "TWO"))
+    data["cellsOnEdge"][:, :] = mesh.edge.cell
+    data.createVariable(
+        "edgesOnEdge", "i4", ("nEdges", "maxEdges2"))
+    data["edgesOnEdge"][:, :] = mesh.edge.edge
+    data.createVariable("nEdgesOnEdge", "i4", ("nEdges"))
+    data["nEdgesOnEdge"][:] = mesh.edge.topo
+
+    data.createVariable("lonVertex", "f8", ("nVertices"))
+    data["lonVertex"][:] = mesh.vert.xlon
+    data.createVariable("latVertex", "f8", ("nVertices"))
+    data["latVertex"][:] = mesh.vert.ylat
+    data.createVariable("xVertex", "f8", ("nVertices"))
+    data["xVertex"][:] = mesh.vert.xpos
+    data.createVariable("yVertex", "f8", ("nVertices"))
+    data["yVertex"][:] = mesh.vert.ypos
+    data.createVariable("zVertex", "f8", ("nVertices"))
+    data["zVertex"][:] = mesh.vert.zpos
+    data.createVariable("areaTriangle", "f8", ("nVertices"))
+    data["areaTriangle"][:] = mesh.vert.area
+    data.createVariable(
+        "kiteAreasOnVertex", "f8", ("nVertices", "vertexDegree"))
+    data["kiteAreasOnVertex"][:, :] = mesh.vert.kite
+    data.createVariable(
+        "edgesOnVertex", "i4", ("nVertices", "vertexDegree"))
+    data["edgesOnVertex"][:, :] = mesh.vert.edge
+    data.createVariable(
+        "cellsOnVertex", "i4", ("nVertices", "vertexDegree"))
+    data["cellsOnVertex"][:, :] = mesh.vert.cell
+   
+    data.createVariable("zb_cell", "f8", ("nCells"))
+    data["zb_cell"][:] = flow.zb_cell
+    data.createVariable("ff_cell", "f8", ("nCells"))
+    data["ff_cell"][:] = flow.ff_cell
+    data.createVariable("ff_edge", "f8", ("nEdges"))
+    data["ff_edge"][:] = flow.ff_edge
+    data.createVariable("ff_vert", "f8", ("nVertices"))
+    data["ff_vert"][:] = flow.ff_vert
+
+    data.createVariable(
+        "uu_edge", "f8", ("Time", "nEdges", "nVertLevels"))
+    data.createVariable(
+        "hh_cell", "f8", ("Time", "nCells", "nVertLevels"))
+    data.createVariable(
+        "dh_cell", "f8", ("Time", "nCells", "nVertLevels"))
+    data.createVariable(
+        "pv_cell", "f8", ("Time", "nCells", "nVertLevels"))
+    data.createVariable(
+        "rv_cell", "f8", ("Time", "nCells", "nVertLevels"))
+    data.createVariable(
+        "ke_cell", "f8", ("Time", "nCells", "nVertLevels"))
+    data.createVariable(
+        "pv_dual", "f8", ("Time", "nVertices", "nVertLevels"))
+    data.createVariable(
+        "rv_dual", "f8", ("Time", "nVertices", "nVertLevels"))
+    data.createVariable(
+        "ux_dual", "f8", ("Time", "nVertices", "nVertLevels"))
+    data.createVariable(
+        "uy_dual", "f8", ("Time", "nVertices", "nVertLevels"))
+    data.createVariable(
+        "uz_dual", "f8", ("Time", "nVertices", "nVertLevels"))
+
+    data.createVariable("kk_sums", "f8", ("Step"))
+    data.createVariable("pv_sums", "f8", ("Step"))
+
+    data.close()
 
 
 def invariant(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     ff_dual = flow.ff_vert
+    ff_edge = flow.ff_edge
     ff_cell = flow.ff_cell
+
     zb_cell = flow.zb_cell
 
     vv_edge = trsk.edge_lsqr_perp * uu_edge * -1.
 
+    hh_dual, \
     hh_edge = compute_H(mesh, trsk, cnfg, hh_cell, uu_edge)
 
    #ke_cell, \
    #ke_edge = computeKE(mesh, trsk, cnfg, uu_edge, vv_edge)
 
-    ke_edge =  1.0 * uu_edge ** 2
+    ke_edge =  0.5 * uu_edge ** 2
 
-    ke_edge = ke_edge * hh_edge * mesh.edge.area
+    ke_edge = ke_edge * hh_edge * mesh.edge.clen \
+                                * mesh.edge.vlen
 
-    pe_cell = flow.grav * (hh_cell * .5 + zb_cell)
+    pe_cell = flow.grav * (hh_cell * 0.5 + zb_cell)
 
     pe_cell = pe_cell * hh_cell * mesh.cell.area
 
@@ -221,25 +341,34 @@ def invariant(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     rv_dual, pv_dual, \
     rv_cell, pv_cell, pv_edge = computePV(
-        mesh, trsk, cnfg, hh_cell, uu_edge, vv_edge, 
-        ff_dual, ff_cell, 
+        mesh, trsk, cnfg, 
+        hh_cell, hh_edge, hh_dual, uu_edge, vv_edge,
+        ff_dual, ff_edge, ff_cell, 
         +0.0 / 1.0 * cnfg.time_step, cnfg.apvm_beta)
 
-    pv_sums = np.sum(hh_cell * pv_cell ** 2)
-   
+   #pv_sums = np.sum(
+   #    +0.5 * mesh.cell.area * hh_cell * pv_cell ** 2)
+
+    pv_sums = np.sum(
+        +0.5 * mesh.vert.area * hh_dual * pv_dual ** 2)
+
     return kk_sums, pv_sums
 
 
 def step_RK22(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
 #-- A 2-stage RK2 + FB scheme, a'la ROMS:
-#-- A.F. Shchepetk, J.C. McWilliams (2005): The regional oceanic 
+#-- A.F. Shchepetkin, J.C. McWilliams (2005): The regional oceanic 
 #-- modeling system (ROMS): a split-explicit, free-surface, 
 #-- topography-following-coordinate oceanic model
 #-- doi.org/10.1016/j.ocemod.2004.08.002
 
+#-- but with thickness updated via an SSP-RK2 approach
+
     ff_cell = flow.ff_cell
+    ff_edge = flow.ff_edge
     ff_dual = flow.ff_vert
+
     zb_cell = flow.zb_cell
 
 #-- 1st RK + FB stage
@@ -250,15 +379,18 @@ def step_RK22(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     vv_edge = trsk.edge_lsqr_perp * uu_edge * -1.
 
+    hh_dual, \
     hh_edge = compute_H(mesh, trsk, cnfg, hh_cell, uu_edge)
 
     uh_edge = uu_edge * hh_edge
 
-    dd_cell = trsk.cell_flux_sums * uh_edge
-    dd_cell = dd_cell / mesh.cell.area
+    uh_cell = trsk.cell_flux_sums * uh_edge
+    uh_cell/= mesh.cell.area
+
+    uh_cell[mesh.cell.mask] = +0.0
 
     h1_cell = (
-        hh_cell - 1.0 / 1.0 * cnfg.time_step * dd_cell
+        hh_cell - 1.0 / 1.0 * cnfg.time_step * uh_cell
     )
 
     ttoc = time.time()
@@ -269,11 +401,13 @@ def step_RK22(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
     hb_cell = h1_cell * (0.0 + 1.0 * BETA) + \
               hh_cell * (1.0 - 1.0 * BETA)
 
+    hb_dual, \
     hb_edge = compute_H(mesh, trsk, cnfg, hb_cell, uu_edge)
 
     uh_edge = uu_edge * hb_edge
 
-    ke_cell = computeKE(mesh, trsk, cnfg, uu_edge, vv_edge)
+    ke_cell = computeKE(mesh, trsk, cnfg, 
+        hb_cell, hb_edge, hb_dual, uu_edge, vv_edge)
 
     hk_cell = hb_cell + zb_cell 
     hk_cell = ke_cell + hk_cell * flow.grav
@@ -282,14 +416,18 @@ def step_RK22(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     rv_dual, pv_dual, rv_cell, pv_cell, \
     pv_edge = computePV(
-        mesh, trsk, cnfg, hb_cell, uu_edge, vv_edge, 
-        ff_dual, ff_cell, 
+        mesh, trsk, cnfg, 
+        hb_cell, hb_edge, hb_dual, uu_edge, vv_edge, 
+        ff_dual, ff_edge, ff_cell, 
         +0.0 / 1.0 * cnfg.time_step, cnfg.apvm_beta)
 
-    qh_edge = advect_PV(mesh, trsk, cnfg, uh_edge, pv_edge)
+    qh_flux = advect_PV(mesh, trsk, cnfg, uh_edge, pv_edge)
+
+    hk_grad[mesh.edge.mask] = 0.0
+    qh_flux[mesh.edge.mask] = 0.0
 
     u1_edge = uu_edge - 1.0 / 1.0 * cnfg.time_step * (
-        hk_grad + qh_edge
+        hk_grad + qh_flux
     )
 
     ttoc = time.time()
@@ -306,15 +444,18 @@ def step_RK22(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     vm_edge = trsk.edge_lsqr_perp * um_edge * -1.
 
-    hm_edge = compute_H(mesh, trsk, cnfg, hm_cell, um_edge)
+    h1_dual, \
+    h1_edge = compute_H(mesh, trsk, cnfg, h1_cell, u1_edge)
 
-    uh_edge = um_edge * hm_edge
+    uh_edge = u1_edge * h1_edge
 
-    dd_cell = trsk.cell_flux_sums * uh_edge
-    dd_cell = dd_cell / mesh.cell.area
+    uh_cell = trsk.cell_flux_sums * uh_edge
+    uh_cell/= mesh.cell.area
+
+    uh_cell[mesh.cell.mask] = +0.0
 
     h2_cell = (
-        hh_cell - 1.0 / 1.0 * cnfg.time_step * dd_cell
+        hm_cell - 1.0 / 2.0 * cnfg.time_step * uh_cell
     )
 
     ttoc = time.time()
@@ -326,11 +467,13 @@ def step_RK22(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
               h1_cell * (0.0 + 1.0 * BETA) + \
               hh_cell * (0.5)
 
+    hb_dual, \
     hb_edge = compute_H(mesh, trsk, cnfg, hb_cell, um_edge)
 
     uh_edge = um_edge * hb_edge
 
-    ke_cell = computeKE(mesh, trsk, cnfg, um_edge, vm_edge)
+    ke_cell = computeKE(mesh, trsk, cnfg, 
+        hb_cell, hb_edge, hb_dual, um_edge, vm_edge)
 
     hk_cell = hb_cell + zb_cell 
     hk_cell = ke_cell + hk_cell * flow.grav
@@ -339,14 +482,18 @@ def step_RK22(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     rv_dual, pv_dual, rv_cell, pv_cell, \
     pv_edge = computePV(
-        mesh, trsk, cnfg, hb_cell, um_edge, vm_edge, 
-        ff_dual, ff_cell, 
+        mesh, trsk, cnfg, 
+        hb_cell, hb_edge, hb_dual, um_edge, vm_edge, 
+        ff_dual, ff_edge, ff_cell, 
         +1.0 / 1.0 * cnfg.time_step, cnfg.apvm_beta)
 
-    qh_edge = advect_PV(mesh, trsk, cnfg, uh_edge, pv_edge)
+    qh_flux = advect_PV(mesh, trsk, cnfg, uh_edge, pv_edge)
+
+    hk_grad[mesh.edge.mask] = 0.0
+    qh_flux[mesh.edge.mask] = 0.0
 
     u2_edge = uu_edge - 1.0 / 1.0 * cnfg.time_step * (
-        hk_grad + qh_edge
+        hk_grad + qh_flux
     )
 
     ttoc = time.time()
@@ -366,7 +513,9 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 #-- but with FB weighting applied within each RK stage
 
     ff_cell = flow.ff_cell
+    ff_edge = flow.ff_edge
     ff_dual = flow.ff_vert
+
     zb_cell = flow.zb_cell
 
 #-- 1st RK + FB stage
@@ -377,15 +526,18 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     vv_edge = trsk.edge_lsqr_perp * uu_edge * -1.
 
+    hh_dual, \
     hh_edge = compute_H(mesh, trsk, cnfg, hh_cell, uu_edge)
 
     uh_edge = uu_edge * hh_edge
 
-    dd_cell = trsk.cell_flux_sums * uh_edge
-    dd_cell = dd_cell / mesh.cell.area
+    uh_cell = trsk.cell_flux_sums * uh_edge
+    uh_cell/= mesh.cell.area
+
+    uh_cell[mesh.cell.mask] = +0.0
 
     h1_cell = (
-        hh_cell - 1.0 / 3.0 * cnfg.time_step * dd_cell
+        hh_cell - 1.0 / 3.0 * cnfg.time_step * uh_cell
     )
 
     ttoc = time.time()
@@ -396,11 +548,13 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
     hb_cell = h1_cell * (0.0 + 1.0 * BETA) + \
               hh_cell * (1.0 - 1.0 * BETA)
 
+    hb_dual, \
     hb_edge = compute_H(mesh, trsk, cnfg, hb_cell, uu_edge)
 
     uh_edge = uu_edge * hb_edge
 
-    ke_cell = computeKE(mesh, trsk, cnfg, uu_edge, vv_edge)
+    ke_cell = computeKE(mesh, trsk, cnfg, 
+        hb_cell, hb_edge, hb_dual, uu_edge, vv_edge)
 
     hk_cell = hb_cell + zb_cell 
     hk_cell = ke_cell + hk_cell * flow.grav
@@ -409,14 +563,18 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     rv_dual, pv_dual, rv_cell, pv_cell, \
     pv_edge = computePV(
-        mesh, trsk, cnfg, hb_cell, uu_edge, vv_edge, 
-        ff_dual, ff_cell, 
+        mesh, trsk, cnfg, 
+        hb_cell, hb_edge, hb_dual, uu_edge, vv_edge, 
+        ff_dual, ff_edge, ff_cell, 
         +0.0 / 1.0 * cnfg.time_step, cnfg.apvm_beta)
 
-    qh_edge = advect_PV(mesh, trsk, cnfg, uh_edge, pv_edge)
+    qh_flux = advect_PV(mesh, trsk, cnfg, uh_edge, pv_edge)
+
+    hk_grad[mesh.edge.mask] = 0.0
+    qh_flux[mesh.edge.mask] = 0.0
 
     u1_edge = uu_edge - 1.0 / 3.0 * cnfg.time_step * (
-        hk_grad + qh_edge
+        hk_grad + qh_flux
     )
 
     ttoc = time.time()
@@ -430,15 +588,18 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     v1_edge = trsk.edge_lsqr_perp * u1_edge * -1.
 
+    h1_dual, \
     h1_edge = compute_H(mesh, trsk, cnfg, h1_cell, u1_edge)
 
     uh_edge = u1_edge * h1_edge
 
-    dd_cell = trsk.cell_flux_sums * uh_edge
-    dd_cell = dd_cell / mesh.cell.area
+    uh_cell = trsk.cell_flux_sums * uh_edge
+    uh_cell/= mesh.cell.area
+
+    uh_cell[mesh.cell.mask] = +0.0
 
     h2_cell = (
-        hh_cell - 1.0 / 2.0 * cnfg.time_step * dd_cell
+        hh_cell - 1.0 / 2.0 * cnfg.time_step * uh_cell
     )
 
     ttoc = time.time()
@@ -449,11 +610,13 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
     hb_cell = h2_cell * (0.0 + 1.0 * BETA) + \
               h1_cell * (1.0 - 1.0 * BETA)
 
+    hb_dual, \
     hb_edge = compute_H(mesh, trsk, cnfg, hb_cell, u1_edge)
 
     uh_edge = u1_edge * hb_edge
 
-    ke_cell = computeKE(mesh, trsk, cnfg, u1_edge, v1_edge)
+    ke_cell = computeKE(mesh, trsk, cnfg, 
+        hb_cell, hb_edge, hb_dual, u1_edge, v1_edge)
 
     hk_cell = hb_cell + zb_cell 
     hk_cell = ke_cell + hk_cell * flow.grav
@@ -462,14 +625,18 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     rv_dual, pv_dual, rv_cell, pv_cell, \
     pv_edge = computePV(
-        mesh, trsk, cnfg, hb_cell, u1_edge, v1_edge, 
-        ff_dual, ff_cell, 
+        mesh, trsk, cnfg, 
+        hb_cell, hb_edge, hb_dual, u1_edge, v1_edge, 
+        ff_dual, ff_edge, ff_cell, 
         +1.0 / 3.0 * cnfg.time_step, cnfg.apvm_beta)
 
-    qh_edge = advect_PV(mesh, trsk, cnfg, uh_edge, pv_edge)
+    qh_flux = advect_PV(mesh, trsk, cnfg, uh_edge, pv_edge)
+
+    hk_grad[mesh.edge.mask] = 0.0
+    qh_flux[mesh.edge.mask] = 0.0
 
     u2_edge = uu_edge - 1.0 / 2.0 * cnfg.time_step * (
-        hk_grad + qh_edge
+        hk_grad + qh_flux
     )
 
     ttoc = time.time()
@@ -483,15 +650,18 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
     
     v2_edge = trsk.edge_lsqr_perp * u2_edge * -1.
 
+    h2_dual, \
     h2_edge = compute_H(mesh, trsk, cnfg, h2_cell, u2_edge)
 
     uh_edge = u2_edge * h2_edge
 
-    dd_cell = trsk.cell_flux_sums * uh_edge
-    dd_cell = dd_cell / mesh.cell.area
+    uh_cell = trsk.cell_flux_sums * uh_edge
+    uh_cell/= mesh.cell.area
+
+    uh_cell[mesh.cell.mask] = +0.0
 
     h3_cell = (
-        hh_cell - 1.0 / 1.0 * cnfg.time_step * dd_cell
+        hh_cell - 1.0 / 1.0 * cnfg.time_step * uh_cell
     )
 
     ttoc = time.time()
@@ -503,11 +673,13 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
               h2_cell * (1.0 - 2.0 * BETA) + \
               hh_cell * (0.0 + 1.0 * BETA)
 
+    hb_dual, \
     hb_edge = compute_H(mesh, trsk, cnfg, hb_cell, u2_edge)
 
     uh_edge = u2_edge * hb_edge
 
-    ke_cell = computeKE(mesh, trsk, cnfg, u2_edge, v2_edge)
+    ke_cell = computeKE(mesh, trsk, cnfg, 
+        hb_cell, hb_edge, hb_dual, u2_edge, v2_edge)
 
     hk_cell = hb_cell + zb_cell 
     hk_cell = ke_cell + hk_cell * flow.grav
@@ -516,14 +688,18 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     rv_dual, pv_dual, rv_cell, pv_cell, \
     pv_edge = computePV(
-        mesh, trsk, cnfg, hb_cell, u2_edge, v2_edge, 
-        ff_dual, ff_cell, 
+        mesh, trsk, cnfg, 
+        hb_cell, hb_edge, hb_dual, u2_edge, v2_edge, 
+        ff_dual, ff_edge, ff_cell, 
         +1.0 / 2.0 * cnfg.time_step, cnfg.apvm_beta)
 
-    qh_edge = advect_PV(mesh, trsk, cnfg, uh_edge, pv_edge)
+    qh_flux = advect_PV(mesh, trsk, cnfg, uh_edge, pv_edge)
+
+    hk_grad[mesh.edge.mask] = 0.0
+    qh_flux[mesh.edge.mask] = 0.0
 
     u3_edge = uu_edge - 1.0 / 1.0 * cnfg.time_step * (
-        hk_grad + qh_edge
+        hk_grad + qh_flux
     )
 
     ttoc = time.time()
@@ -537,75 +713,108 @@ def compute_H(mesh, trsk, cnfg, hh_cell, uu_edge):
 
     if (cnfg.operators == "TRSK-CV"):
 
-        hh_edge = trsk.edge_wing_sums * hh_cell
-        hh_edge = hh_edge / mesh.edge.area
+        hh_dual = trsk.dual_kite_sums * hh_cell
+        hh_dual/= mesh.vert.area
+
+        h1_edge = trsk.edge_wing_sums * hh_cell
+        h2_edge = trsk.edge_stub_sums * hh_dual
+        
+        hh_edge = 0.5 * h1_edge + 0.5 * h2_edge
+        hh_edge/= mesh.edge.area
 
     if (cnfg.operators == "TRSK-MD"):
 
+        hh_dual = trsk.dual_kite_sums * hh_cell
+        hh_dual/= mesh.vert.area
+
         hh_edge = trsk.edge_cell_sums * hh_cell
-        hh_edge = hh_edge * 0.5E+00
+        hh_edge*= 0.5E+00
 
-    return hh_edge
+    return hh_dual, hh_edge
 
 
-def computePV(mesh, trsk, cnfg, hh_cell, uu_edge, vv_edge, 
-              ff_dual, ff_cell,
+def limit_div(xnum, xden, xlim):
+
+#-- "de-singularisation"
+#-- A. Kurganov, Y. Liu, V. Zeitlin (2020): A well-balanced 
+#-- central-upwind 
+#-- scheme for the thermal rotating shallow water equations
+#-- https://doi.org/10.1016/j.jcp.2020.109414
+
+    xdsq = xden ** 2
+    xlsq = np.maximum(xdsq, xlim ** 2)
+
+    return 2.0 * xden * xnum / (xdsq + xlsq)
+
+
+def computePV(mesh, trsk, cnfg, 
+              hh_cell, hh_edge, hh_dual, uu_edge, vv_edge, 
+              ff_dual, ff_edge, ff_cell,
               delta_t, pv_damp):
 
     ttic = time.time()
 
     if (cnfg.operators == "TRSK-CV"):
 
-    #-- RV+f on dual, & PV on edge - more compact hh_edge?
-        hh_dual = trsk.dual_kite_sums * hh_cell
-        hh_dual = hh_dual / mesh.vert.area
+        hh_tiny = 1.0E-08
 
+    #-- RV+f on rhombi, PV on edge - more compact hh_edge?        
         rv_dual = trsk.dual_curl_sums * uu_edge
-        rv_dual = rv_dual / mesh.vert.area
+        rv_dual/= mesh.vert.area
         
         av_dual = rv_dual + ff_dual
-        pv_dual = av_dual / hh_dual
+       #pv_dual = av_dual / hh_dual
+        pv_dual = \
+            limit_div(av_dual, hh_dual, hh_tiny)
         
-        pv_cell = trsk.cell_kite_sums * pv_dual
-        pv_cell = pv_cell / mesh.cell.area
+        rv_cell = trsk.cell_kite_sums * rv_dual
+        rv_cell/= mesh.cell.area
 
-        av_cell = pv_cell * hh_cell
-        rv_cell = av_cell - ff_cell
+        av_cell = rv_cell + ff_cell
+       #pv_cell = av_cell / hh_cell
+        pv_cell = \
+            limit_div(av_cell, hh_cell, hh_tiny)
 
-        av_edge = trsk.edge_stub_sums * av_dual
-        av_edge = av_edge / mesh.edge.area
+        # take curl on rhombi, a'la Gassmann
+        rh_edge = trsk.quad_curl_sums * uu_edge
+        rh_edge/= mesh.quad.area
 
-        hh_edge = compute_H(
-            mesh, trsk, cnfg, hh_cell, uu_edge)
+        av_edge = rh_edge + ff_edge
+       #pv_edge = av_edge / hh_edge
+        pv_edge = \
+            limit_div(av_edge, hh_edge, hh_tiny)
 
-        av_edge = upwind_SV(
-            mesh, trsk, cnfg, av_dual, av_cell, av_edge,
+        pv_edge = upwind_SV(
+            mesh, trsk, cnfg, 
+            pv_dual, pv_cell, pv_edge, 
             uu_edge, vv_edge, delta_t, pv_damp)
-
-        pv_edge = av_edge / hh_edge
 
     if (cnfg.operators == "TRSK-MD"):
 
-        hh_dual = trsk.dual_kite_sums * hh_cell
-        hh_dual = hh_dual / mesh.vert.area
+        hh_tiny = 1.0E-08
 
         rv_dual = trsk.dual_curl_sums * uu_edge
-        rv_dual = rv_dual / mesh.vert.area
+        rv_dual/= mesh.vert.area
 
         av_dual = rv_dual + ff_dual
-        pv_dual = av_dual / hh_dual
+       #pv_dual = av_dual / hh_dual
+        pv_dual = \
+            limit_div(av_dual, hh_dual, hh_tiny)
 
-        pv_cell = trsk.cell_kite_sums * pv_dual
-        pv_cell = pv_cell / mesh.cell.area
+        rv_cell = trsk.cell_kite_sums * rv_dual
+        rv_cell/= mesh.cell.area
 
-        av_cell = pv_cell * hh_cell
-        rv_cell = av_cell - ff_cell
+        av_cell = rv_cell + ff_cell
+       #pv_cell = av_cell / hh_cell
+        pv_cell = \
+            limit_div(av_cell, hh_cell, hh_tiny)
 
         pv_edge = trsk.edge_vert_sums * pv_dual
-        pv_edge = pv_edge * 0.5E+00
+        pv_edge*= 0.5E+00
 
         pv_edge = upwind_SV(
-            mesh, trsk, cnfg, pv_dual, pv_cell, pv_edge, 
+            mesh, trsk, cnfg, 
+            pv_dual, pv_cell, pv_edge, 
             uu_edge, vv_edge, delta_t, pv_damp)
 
     ttoc = time.time()
@@ -633,8 +842,8 @@ def upwind_SV(mesh, trsk, cnfg, sv_dual, sv_cell, sv_edge,
         gy_dual = trsk.dual_lsqr_yprp * gv_edge
         gz_dual = trsk.dual_lsqr_zprp * gv_edge
 
-        up_edge = vv_edge >= 0.
-        dn_edge = vv_edge <= 0.
+        up_edge = vv_edge >= 0.0
+        dn_edge = vv_edge <= 0.0
 
         up_dual = np.zeros(
             mesh.edge.size, dtype=np.int32)
@@ -656,7 +865,7 @@ def upwind_SV(mesh, trsk, cnfg, sv_dual, sv_cell, sv_edge,
         ua_edge = np.abs(uu_edge) + ZERO
         
         BIAS = (
-            +1. / 6. * va_edge / (ua_edge + va_edge)
+            +1. / 5. * va_edge / (ua_edge + va_edge)
         )
 
         sv_wind = sv_dual[up_dual] + \
@@ -670,8 +879,8 @@ def upwind_SV(mesh, trsk, cnfg, sv_dual, sv_cell, sv_edge,
     if (cnfg.pv_scheme == "APVM"):
 
     #-- upwind APVM, a'la Ringler
-        gn_edge = trsk.apvm_grad_norm * sv_dual * -1.
-        gp_edge = trsk.apvm_grad_perp * sv_dual * -1.
+        gn_edge = trsk.edge_grad_norm * sv_cell * +1.
+        gp_edge = trsk.edge_grad_perp * sv_dual * -1.
 
         sv_apvm = sv_damp * uu_edge * gn_edge + \
                   sv_damp * vv_edge * gp_edge
@@ -684,35 +893,132 @@ def upwind_SV(mesh, trsk, cnfg, sv_dual, sv_cell, sv_edge,
     return sv_edge
 
 
-def computeKE(mesh, trsk, cnfg, uu_edge, vv_edge):
+def computeKE(mesh, trsk, cnfg, 
+              hh_cell, hh_edge, hh_dual, uu_edge, vv_edge):
 
     ttic = time.time()
 
     if (cnfg.operators == "TRSK-CV"):
 
-        ke_edge = 0.5 * (uu_edge ** 2 + vv_edge ** 2)
+        if ("CENTRE" in cnfg.ke_scheme):
 
-        ke_cell = trsk.cell_wing_sums * ke_edge
-        ke_cell = ke_cell / mesh.cell.area
-        
-        ux_cell = trsk.cell_lsqr_xnrm * uu_edge
-        uy_cell = trsk.cell_lsqr_ynrm * uu_edge
-        uz_cell = trsk.cell_lsqr_znrm * uu_edge
-        
-        k2_cell = 0.5 * (ux_cell ** 2 + 
-                         uy_cell ** 2 +
-                         uz_cell ** 2)
-        
-        ke_cell = 0.5 * ke_cell + 0.5 * k2_cell
-        
+            ke_edge = \
+                0.5 * (uu_edge ** 2 + vv_edge ** 2)
+
+        if ("UPWIND" in cnfg.ke_scheme):
+
+            ul_edge = trsk.edge_lsqr_lnrm * uu_edge
+            ur_edge = trsk.edge_lsqr_rnrm * uu_edge
+
+            uu_wind = np.zeros(
+                mesh.edge.size, dtype=uu_edge.dtype)      
+
+            up_mark = np.where(uu_edge < 0.0)
+            uu_wind[up_mark] = ur_edge[up_mark]
+
+            up_mark = np.where(uu_edge > 0.0)
+            uu_wind[up_mark] = ul_edge[up_mark]
+
+            uu_wind = (0.0 + 1.0 / 3.0) * uu_wind \
+                    + (1.0 - 1.0 / 3.0) * uu_edge
+
+            ke_edge = \
+                0.5 * (uu_wind ** 2 + vv_edge ** 2)
+
+        if ("WEIGHT" in cnfg.ke_scheme):
+
+            hh_thin = 1.0E+02
+            hh_tiny = 1.0E-08
+ 
+            hh_scal = \
+                limit_div(hh_thin, hh_edge, hh_tiny)
+
+            ke_edge = ke_edge * \
+                ((1.0 + hh_scal) ** 2) ** 2
+
+            ke_cell = trsk.cell_wing_sums * ke_edge
+            ke_cell/= mesh.cell.area
+
+            hh_scal = \
+                limit_div(hh_thin, hh_cell, hh_tiny)
+
+            ke_cell = ke_cell / \
+                ((1.0 + hh_scal) ** 2) ** 2
+
+        else:
+
+            ke_cell = trsk.cell_wing_sums * ke_edge
+            ke_cell/= mesh.cell.area
+
     if (cnfg.operators == "TRSK-MD"):
 
-        ke_edge = 0.25 * uu_edge ** 2 * \
+        if ("CENTRE" in cnfg.ke_scheme):
+
+            ke_edge = 0.25 * uu_edge ** 2 * \
                   mesh.edge.clen * \
                   mesh.edge.vlen
-        ke_cell = trsk.cell_edge_sums * ke_edge
-        ke_cell = ke_cell / mesh.cell.area
-        
+
+        if ("UPWIND" in cnfg.ke_scheme):
+
+            ul_edge = trsk.edge_lsqr_lnrm * uu_edge
+            ur_edge = trsk.edge_lsqr_rnrm * uu_edge
+
+            uu_wind = np.zeros(
+                mesh.edge.size, dtype=uu_edge.dtype)  
+
+            up_mark = np.where(uu_edge < 0.0)
+            uu_wind[up_mark] = ur_edge[up_mark]
+
+            up_mark = np.where(uu_edge > 0.0)
+            uu_wind[up_mark] = ul_edge[up_mark]
+
+            uu_wind = (0.0 + 1.0 / 3.0) * uu_wind \
+                    + (1.0 - 1.0 / 3.0) * uu_edge
+
+            ke_edge = 0.25 * uu_wind ** 2 * \
+                  mesh.edge.clen * \
+                  mesh.edge.vlen
+
+        if ("WEIGHT" in cnfg.ke_scheme):
+
+            hh_thin = 1.0E+02
+            hh_tiny = 1.0E-08
+
+            hs_edge = trsk.edge_vert_sums * hh_dual
+            hs_edge*= 0.5E+00
+            
+            hh_scal = \
+                limit_div(hh_thin, hs_edge, hh_tiny)
+
+            ke_edge = ke_edge * \
+                ((1.0 + hh_scal) ** 2) ** 2
+
+            ke_cell = trsk.cell_edge_sums * ke_edge
+            ke_cell/= mesh.cell.area
+
+            hh_scal = \
+                limit_div(hh_thin, hh_cell, hh_tiny)
+
+            ke_cell = ke_cell / \
+                ((1.0 + hh_scal) ** 2) ** 2
+
+        else:
+
+            ke_cell = trsk.cell_edge_sums * ke_edge
+            ke_cell/= mesh.cell.area
+
+            # Gassmann stencil, a'la MPAS-O/MPAS-A
+            """
+            ke_dual = trsk.dual_edge_sums * ke_edge
+            ke_dual/= mesh.vert.area
+
+            k2_cell = trsk.cell_kite_sums * ke_dual
+            k2_cell/= mesh.cell.area
+
+            ke_cell = (0.0 + 5.0 / 8.0) * ke_cell \
+                      (1.0 - 5.0 / 8.0) * k2_cell
+            """
+
     ttoc = time.time()
     tcpu.computeKE = tcpu.computeKE + (ttoc - ttic)
 
@@ -770,6 +1076,13 @@ if (__name__ == "__main__"):
         help="APVM multipling coeff. {BETA = 0.5}.")
 
     parser.add_argument(
+        "--ke-scheme", dest="ke_scheme", type=str,
+        default="UPWIND",
+        required=False, 
+        help="KE.-grad formulation =" +
+        " {UPWIND}, CENTRE, UPWIND-WEIGHT, CENTRE-WEIGHT.")
+
+    parser.add_argument(
         "--operators", dest="operators", type=str,
         default="TRSK-CV",
         required=False, 
@@ -784,4 +1097,4 @@ if (__name__ == "__main__"):
         required=False, 
         default=10000, help="Prints at FREQ-th step.")
 
-    main(parser.parse_args())
+    swe(parser.parse_args())

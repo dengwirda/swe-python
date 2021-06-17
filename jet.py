@@ -1,8 +1,9 @@
 
 from distutils.util import strtobool
 
+import time
 import numpy as np
-from scipy.sparse.linalg import spsolve
+from scipy.sparse.linalg import gcrotmk
 from scipy.integrate import quadrature
 
 import xarray
@@ -48,7 +49,7 @@ def init(name, save, rsph=1.E+0, pert=True):
     print("Load the mesh file")
 
     mesh = load_mesh(name, rsph)
-
+    
 #------------------------------------ build TRSK matrix op's
 
     print("Forming coefficients")
@@ -142,8 +143,14 @@ def init(name, save, rsph=1.E+0, pert=True):
     vrhs = vrhs - np.mean(vrhs)     # INT rhs dA must be 0.0
     vrhs = vrhs - np.mean(vrhs)
 
-    hdel = spsolve(trsk.cell_del2_sums, vrhs)
-
+    ttic = time.time()
+    hdel, info = gcrotmk(
+        trsk.cell_del2_sums, vrhs, tol=1.E-8, m=50, k=25)
+    ttoc = time.time()
+   #print(ttoc - ttic)    
+    
+    if (info != +0): raise Exception("Did not converge!")
+    
     herr = hbar - hdel
     hdel = hdel + (                 # add offset for mean hh
         np.sum(mesh.cell.area * herr) /

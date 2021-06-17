@@ -1,0 +1,94 @@
+
+# TC2 convergence runs
+python3 swe.py \
+--mpas-file="tc2_cvt_6.nc" \
+--num-steps=8640 \
+--time-step=120. \
+--save-freq=270 \
+--stat-freq=135 \
+--operators="TRSK-CV" \
+--integrate="RK22-FB"
+
+python3 swe.py \
+--mpas-file="tc2_cvt_8.nc" \
+--num-steps=17280 \
+--time-step=60. \
+--save-freq=540 \
+--stat-freq=135 \
+--operators="TRSK-MD" \
+--integrate="RK22-FB"
+
+
+# TC2 3-year stability
+python3 swe.py \
+--mpas-file="tc2_cvt_5.nc" \
+--num-steps=788400 \
+--time-step=120. \
+--save-freq=3600 \
+--stat-freq=720 \
+--operators="TRSK-CV" \
+--integrate="RK22-FB"
+
+
+# TC2 "thin" stability
+python3 swe.py \
+--mpas-file="tcb_cvt_4.nc" \
+--num-steps=4320 \
+--time-step=120. \
+--save-freq=720 \
+--stat-freq=135 \
+--operators="TRSK-CV" \
+--integrate="RK22-FB"
+
+
+# TC5 convergence runs
+python3 swe.py \
+--mpas-file="tc5_cvt_5.nc" \
+--num-steps=10800 \
+--time-step=120. \
+--save-freq=720 \
+--stat-freq=135 \
+--operators="TRSK-CV" \
+--integrate="RK22-FB"
+
+python3 swe.py \
+--mpas-file="tc5_cvt_8.nc" \
+--num-steps=21600 \
+--time-step=60. \
+--save-freq=1440 \
+--stat-freq=270 \
+--operators="TRSK-CV" \
+--integrate="RK22-FB"
+
+
+# TC5 50-day long runs
+python3 swe.py \
+--mpas-file="tc5_cvt_7.nc" \
+--num-steps=36000 \
+--time-step=120. \
+--save-freq=720 \
+--stat-freq=135 \
+--operators="TRSK-CV" \
+--integrate="RK22-FB"
+
+
+# Barotropic jet roll-up
+python3 swe.py \
+--mpas-file="jet_cvt_7.nc" \
+--num-steps=4320 \
+--time-step=120. \
+--save-freq=540 \
+--stat-freq=135 \
+--operators="TRSK-CV" \
+--integrate="RK22-FB"
+
+python3 swe.py \
+--mpas-file="jet_cvt_8.nc" \
+--num-steps=8640 \
+--time-step=60. \
+--save-freq=1080 \
+--stat-freq=270 \
+--operators="TRSK-CV" \
+--integrate="RK22-FB"
+
+
