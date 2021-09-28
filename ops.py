@@ -176,36 +176,6 @@ def trsk_mats(mesh):
         mesh.edge.zprp * trsk.edge_lsqr_znrm 
     )
 
-    trsk.edge_cell_lidx = csr_matrix((
-        np.ones(mesh.edge.size), (
-        np.arange(0, mesh.edge.size),
-        mesh.edge.cell[:, 0] - 1)), 
-        shape=(mesh.edge.size, mesh.cell.size))
-
-    trsk.edge_cell_ridx = csr_matrix((
-        np.ones(mesh.edge.size), (
-        np.arange(0, mesh.edge.size),
-        mesh.edge.cell[:, 1] - 1)), 
-        shape=(mesh.edge.size, mesh.cell.size))
-
-    trsk.edge_lsqr_lnrm = +1.0 * (
-        mesh.edge.xnrm * trsk.edge_cell_lidx * 
-                         trsk.cell_lsqr_xnrm +
-        mesh.edge.ynrm * trsk.edge_cell_lidx *
-                         trsk.cell_lsqr_ynrm +
-        mesh.edge.znrm * trsk.edge_cell_lidx *
-                         trsk.cell_lsqr_znrm 
-    )
-
-    trsk.edge_lsqr_rnrm = +1.0 * (
-        mesh.edge.xnrm * trsk.edge_cell_ridx *
-                         trsk.cell_lsqr_xnrm +
-        mesh.edge.ynrm * trsk.edge_cell_ridx *
-                         trsk.cell_lsqr_ynrm +
-        mesh.edge.znrm * trsk.edge_cell_ridx *
-                         trsk.cell_lsqr_znrm 
-    )
-
     return trsk
 
 

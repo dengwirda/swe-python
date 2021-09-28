@@ -7,18 +7,18 @@ import argparse
 
 from msh import load_mesh, load_flow
 from ops import trsk_mats
-from scipy.sparse import csr_matrix, spdiags
 
 
 class base: pass
 tcpu = base()
 tcpu.thickness = 0.0E+00
 tcpu.momentum_ = 0.0E+00
+tcpu.upwinding = 0.0E+00
+tcpu.compute_H = 0.0E+00
 tcpu.computeKE = 0.0E+00
 tcpu.computePV = 0.0E+00
 tcpu.advect_PV = 0.0E+00
-tcpu.upwind_PV = 0.0E+00
-tcpu.computeD2 = 0.0E+00
+tcpu.computeL2 = 0.0E+00
 
 def swe(cnfg):
     """
@@ -32,7 +32,7 @@ def swe(cnfg):
     
     cnfg.integrate = cnfg.integrate.upper()
     cnfg.operators = cnfg.operators.upper()
-    cnfg.pv_scheme = cnfg.pv_scheme.upper()
+    cnfg.up_scheme = cnfg.up_scheme.upper()
     cnfg.ke_scheme = cnfg.ke_scheme.upper()
 
     name = cnfg.mpas_file
@@ -162,9 +162,10 @@ def swe(cnfg):
     print("TCPU:", ttoc - ttic)
     print("tcpu.thickness:", tcpu.thickness)
     print("tcpu.momentum_:", tcpu.momentum_)
+    print("tcpu.upwinding:", tcpu.upwinding) 
+    print("tcpu.compute_H:", tcpu.compute_H)
     print("tcpu.computeKE:", tcpu.computeKE)    
     print("tcpu.computePV:", tcpu.computePV)
-    print("tcpu.upwind_PV:", tcpu.upwind_PV)    
     print("tcpu.advect_PV:", tcpu.advect_PV)
 
     data = nc.Dataset(
@@ -288,23 +289,23 @@ def init_file(mesh, cnfg, flow, save):
     data.createVariable(
         "hh_cell", "f8", ("Time", "nCells", "nVertLevels"))
     data.createVariable(
-        "dh_cell", "f8", ("Time", "nCells", "nVertLevels"))
+        "dh_cell", "f4", ("Time", "nCells", "nVertLevels"))
     data.createVariable(
-        "pv_cell", "f8", ("Time", "nCells", "nVertLevels"))
+        "pv_cell", "f4", ("Time", "nCells", "nVertLevels"))
     data.createVariable(
-        "rv_cell", "f8", ("Time", "nCells", "nVertLevels"))
+        "rv_cell", "f4", ("Time", "nCells", "nVertLevels"))
     data.createVariable(
-        "ke_cell", "f8", ("Time", "nCells", "nVertLevels"))
+        "ke_cell", "f4", ("Time", "nCells", "nVertLevels"))
     data.createVariable(
-        "pv_dual", "f8", ("Time", "nVertices", "nVertLevels"))
+        "pv_dual", "f4", ("Time", "nVertices", "nVertLevels"))
     data.createVariable(
-        "rv_dual", "f8", ("Time", "nVertices", "nVertLevels"))
+        "rv_dual", "f4", ("Time", "nVertices", "nVertLevels"))
     data.createVariable(
-        "ux_dual", "f8", ("Time", "nVertices", "nVertLevels"))
+        "ux_dual", "f4", ("Time", "nVertices", "nVertLevels"))
     data.createVariable(
-        "uy_dual", "f8", ("Time", "nVertices", "nVertLevels"))
+        "uy_dual", "f4", ("Time", "nVertices", "nVertLevels"))
     data.createVariable(
-        "uz_dual", "f8", ("Time", "nVertices", "nVertLevels"))
+        "uz_dual", "f4", ("Time", "nVertices", "nVertLevels"))
 
     data.createVariable("kk_sums", "f8", ("Step"))
     data.createVariable("pv_sums", "f8", ("Step"))
@@ -344,7 +345,7 @@ def invariant(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
         mesh, trsk, cnfg, 
         hh_cell, hh_edge, hh_dual, uu_edge, vv_edge,
         ff_dual, ff_edge, ff_cell, 
-        +0.0 / 1.0 * cnfg.time_step, cnfg.apvm_beta)
+        +0.0 * cnfg.time_step, 0.0 * cnfg.pv_upwind)
 
    #pv_sums = np.sum(
    #    +0.5 * mesh.cell.area * hh_cell * pv_cell ** 2)
@@ -407,7 +408,9 @@ def step_RK22(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
     uh_edge = uu_edge * hb_edge
 
     ke_cell = computeKE(mesh, trsk, cnfg, 
-        hb_cell, hb_edge, hb_dual, uu_edge, vv_edge)
+        hb_cell, hb_edge, hb_dual, 
+        uu_edge, vv_edge,
+        +0.0 / 1.0 * cnfg.time_step, cnfg.ke_upwind)
 
     hk_cell = hb_cell + zb_cell 
     hk_cell = ke_cell + hk_cell * flow.grav
@@ -419,7 +422,7 @@ def step_RK22(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
         mesh, trsk, cnfg, 
         hb_cell, hb_edge, hb_dual, uu_edge, vv_edge, 
         ff_dual, ff_edge, ff_cell, 
-        +0.0 / 1.0 * cnfg.time_step, cnfg.apvm_beta)
+        +0.0 / 1.0 * cnfg.time_step, cnfg.pv_upwind)
 
     qh_flux = advect_PV(mesh, trsk, cnfg, uh_edge, pv_edge)
 
@@ -437,7 +440,7 @@ def step_RK22(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     ttic = time.time()
 
-    BETA = (1.0 / 6.0) * ("FB" in cnfg.integrate)
+    BETA = (2.0 / 3.0) * ("FB" in cnfg.integrate)
 
     hm_cell = 0.5 * hh_cell + 0.5 * h1_cell
     um_edge = 0.5 * uu_edge + 0.5 * u1_edge
@@ -463,8 +466,8 @@ def step_RK22(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     ttic = time.time()
 
-    hb_cell = h2_cell * (0.5 - 1.0 * BETA) + \
-              h1_cell * (0.0 + 1.0 * BETA) + \
+    hb_cell = h2_cell * (0.0 + 0.5 * BETA) + \
+              h1_cell * (0.5 - 0.5 * BETA) + \
               hh_cell * (0.5)
 
     hb_dual, \
@@ -473,7 +476,9 @@ def step_RK22(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
     uh_edge = um_edge * hb_edge
 
     ke_cell = computeKE(mesh, trsk, cnfg, 
-        hb_cell, hb_edge, hb_dual, um_edge, vm_edge)
+        hb_cell, hb_edge, hb_dual, 
+        um_edge, vm_edge,
+        +1.0 / 1.0 * cnfg.time_step, cnfg.ke_upwind)
 
     hk_cell = hb_cell + zb_cell 
     hk_cell = ke_cell + hk_cell * flow.grav
@@ -483,9 +488,9 @@ def step_RK22(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
     rv_dual, pv_dual, rv_cell, pv_cell, \
     pv_edge = computePV(
         mesh, trsk, cnfg, 
-        hb_cell, hb_edge, hb_dual, um_edge, vm_edge, 
+        hb_cell, hb_edge, hb_dual, um_edge, vm_edge,
         ff_dual, ff_edge, ff_cell, 
-        +1.0 / 1.0 * cnfg.time_step, cnfg.apvm_beta)
+        +1.0 / 1.0 * cnfg.time_step, cnfg.pv_upwind)
 
     qh_flux = advect_PV(mesh, trsk, cnfg, uh_edge, pv_edge)
 
@@ -554,7 +559,9 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
     uh_edge = uu_edge * hb_edge
 
     ke_cell = computeKE(mesh, trsk, cnfg, 
-        hb_cell, hb_edge, hb_dual, uu_edge, vv_edge)
+        hb_cell, hb_edge, hb_dual, 
+        uu_edge, vv_edge,
+        +0.0 / 1.0 * cnfg.time_step, cnfg.ke_upwind)
 
     hk_cell = hb_cell + zb_cell 
     hk_cell = ke_cell + hk_cell * flow.grav
@@ -566,7 +573,7 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
         mesh, trsk, cnfg, 
         hb_cell, hb_edge, hb_dual, uu_edge, vv_edge, 
         ff_dual, ff_edge, ff_cell, 
-        +0.0 / 1.0 * cnfg.time_step, cnfg.apvm_beta)
+        +0.0 / 1.0 * cnfg.time_step, cnfg.pv_upwind)
 
     qh_flux = advect_PV(mesh, trsk, cnfg, uh_edge, pv_edge)
 
@@ -616,7 +623,9 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
     uh_edge = u1_edge * hb_edge
 
     ke_cell = computeKE(mesh, trsk, cnfg, 
-        hb_cell, hb_edge, hb_dual, u1_edge, v1_edge)
+        hb_cell, hb_edge, hb_dual, 
+        u1_edge, v1_edge,
+        +1.0 / 3.0 * cnfg.time_step, cnfg.ke_upwind)
 
     hk_cell = hb_cell + zb_cell 
     hk_cell = ke_cell + hk_cell * flow.grav
@@ -628,7 +637,7 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
         mesh, trsk, cnfg, 
         hb_cell, hb_edge, hb_dual, u1_edge, v1_edge, 
         ff_dual, ff_edge, ff_cell, 
-        +1.0 / 3.0 * cnfg.time_step, cnfg.apvm_beta)
+        +1.0 / 3.0 * cnfg.time_step, cnfg.pv_upwind)
 
     qh_flux = advect_PV(mesh, trsk, cnfg, uh_edge, pv_edge)
 
@@ -679,7 +688,9 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
     uh_edge = u2_edge * hb_edge
 
     ke_cell = computeKE(mesh, trsk, cnfg, 
-        hb_cell, hb_edge, hb_dual, u2_edge, v2_edge)
+        hb_cell, hb_edge, hb_dual, 
+        u2_edge, v2_edge,
+        +1.0 / 2.0 * cnfg.time_step, cnfg.ke_upwind)
 
     hk_cell = hb_cell + zb_cell 
     hk_cell = ke_cell + hk_cell * flow.grav
@@ -691,7 +702,7 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
         mesh, trsk, cnfg, 
         hb_cell, hb_edge, hb_dual, u2_edge, v2_edge, 
         ff_dual, ff_edge, ff_cell, 
-        +1.0 / 2.0 * cnfg.time_step, cnfg.apvm_beta)
+        +1.0 / 2.0 * cnfg.time_step, cnfg.pv_upwind)
 
     qh_flux = advect_PV(mesh, trsk, cnfg, uh_edge, pv_edge)
 
@@ -709,7 +720,126 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
            rv_cell, pv_cell, rv_dual, pv_dual
 
 
+def limit_div(xnum, xden, xlim):
+
+#-- "de-singularisation"
+#-- A. Kurganov, Y. Liu, V. Zeitlin (2020): A well-balanced 
+#-- central-upwind 
+#-- scheme for the thermal rotating shallow water equations
+#-- https://doi.org/10.1016/j.jcp.2020.109414
+
+    xdsq = xden ** 2
+    xlsq = np.maximum(xdsq, xlim ** 2)
+
+    return 2.0 * xden * xnum / (xdsq + xlsq)
+
+
+def hrmn_mean(xone, xtwo):
+
+#-- harmonic mean of two vectors (ie. biased toward lesser)
+
+    return 2.0 * xone * xtwo / (xone + xtwo)
+
+
+def upwinding(mesh, trsk, cnfg, sv_dual, sv_cell, sv_edge,
+              uu_edge, vv_edge, 
+              delta_t, up_bias):
+
+    ttic = time.time()
+
+    if (cnfg.up_scheme == "LUST"):
+
+    #-- upwind bias, a'la Weller
+    #-- H. Weller (2012): Controlling the computational modes 
+    #-- of the arbitrarily structured C grid
+    #-- https://doi.org/10.1175/MWR-D-11-00221.1
+        gv_edge = trsk.edge_grad_perp * sv_dual
+
+        gx_dual = trsk.dual_lsqr_xprp * gv_edge
+        gy_dual = trsk.dual_lsqr_yprp * gv_edge
+        gz_dual = trsk.dual_lsqr_zprp * gv_edge
+
+        up_edge = np.where(vv_edge >= 0.0)
+        dn_edge = np.where(vv_edge <= 0.0)
+
+        up_dual = np.zeros(
+            mesh.edge.size, dtype=np.int32)
+        up_dual[up_edge] = \
+            mesh.edge.vert[up_edge, 1] - 1
+        up_dual[dn_edge] = \
+            mesh.edge.vert[dn_edge, 0] - 1
+
+        up_xdel = \
+            mesh.edge.xmid - mesh.vert.xmid[up_dual]
+        up_ydel = \
+            mesh.edge.ymid - mesh.vert.ymid[up_dual]
+        up_zdel = \
+            mesh.edge.zmid - mesh.vert.zmid[up_dual]
+
+        uu_tiny = 1.0E-16
+
+        va_edge = np.abs(vv_edge) + uu_tiny
+        ua_edge = np.abs(uu_edge) + uu_tiny
+        
+        BIAS = (
+            up_bias * va_edge / (ua_edge + va_edge)
+        )
+
+        sv_wind = sv_dual[up_dual] + \
+            up_xdel * gx_dual[up_dual] + \
+            up_ydel * gy_dual[up_dual] + \
+            up_zdel * gz_dual[up_dual]
+
+        sv_edge = \
+            BIAS * sv_wind + (1.0 - BIAS) * sv_edge
+
+    if (cnfg.up_scheme == "APVM"):
+
+        gn_edge = trsk.edge_grad_norm * sv_cell * +1.
+        gp_edge = trsk.edge_grad_perp * sv_dual * -1.
+
+    #-- upwind APVM, scale w time
+        up_bias = 0.5                   # hard-coded?
+        sv_apvm = up_bias * uu_edge * gn_edge + \
+                  up_bias * vv_edge * gp_edge
+
+        sv_edge = sv_edge - delta_t * sv_apvm
+        
+    if (cnfg.up_scheme == "AUST"):
+        
+    #-- AUST: anticipated upstream method; APVM meets
+    #-- LUST? Upwinds in multi-dimensional sense, vs.
+    #-- LUST, which upwinds via tangential dir. only.
+
+        gn_edge = trsk.edge_grad_norm * sv_cell * +1.
+        gp_edge = trsk.edge_grad_perp * sv_dual * -1.
+
+    #-- upwind APVM, scale w grid
+        uu_tiny = 1.0E-16
+
+        um_edge = uu_tiny + np.sqrt(
+            uu_edge ** 2 + vv_edge ** 2)
+
+        ee_scal = 0.50 * hrmn_mean(
+            mesh.edge.clen, mesh.edge.vlen)
+
+        sv_wind = uu_edge * gn_edge / um_edge + \
+                  vv_edge * gp_edge / um_edge
+
+        sv_wind = sv_edge - ee_scal * sv_wind
+
+        sv_edge = (0.E+0 + up_bias) * sv_wind \
+                + (1.E+0 - up_bias) * sv_edge
+        
+    ttoc = time.time()
+    tcpu.upwinding = tcpu.upwinding + (ttoc - ttic)
+
+    return sv_edge
+
+
 def compute_H(mesh, trsk, cnfg, hh_cell, uu_edge):
+
+    ttic = time.time()
 
     if (cnfg.operators == "TRSK-CV"):
 
@@ -730,27 +860,16 @@ def compute_H(mesh, trsk, cnfg, hh_cell, uu_edge):
         hh_edge = trsk.edge_cell_sums * hh_cell
         hh_edge*= 0.5E+00
 
+    ttoc = time.time()
+    tcpu.compute_H = tcpu.compute_H + (ttoc - ttic)
+
     return hh_dual, hh_edge
-
-
-def limit_div(xnum, xden, xlim):
-
-#-- "de-singularisation"
-#-- A. Kurganov, Y. Liu, V. Zeitlin (2020): A well-balanced 
-#-- central-upwind 
-#-- scheme for the thermal rotating shallow water equations
-#-- https://doi.org/10.1016/j.jcp.2020.109414
-
-    xdsq = xden ** 2
-    xlsq = np.maximum(xdsq, xlim ** 2)
-
-    return 2.0 * xden * xnum / (xdsq + xlsq)
 
 
 def computePV(mesh, trsk, cnfg, 
               hh_cell, hh_edge, hh_dual, uu_edge, vv_edge, 
               ff_dual, ff_edge, ff_cell,
-              delta_t, pv_damp):
+              delta_t, up_bias):
 
     ttic = time.time()
 
@@ -776,18 +895,18 @@ def computePV(mesh, trsk, cnfg,
             limit_div(av_cell, hh_cell, hh_tiny)
 
         # take curl on rhombi, a'la Gassmann
-        rh_edge = trsk.quad_curl_sums * uu_edge
-        rh_edge/= mesh.quad.area
+        rv_edge = trsk.quad_curl_sums * uu_edge
+        rv_edge/= mesh.quad.area
 
-        av_edge = rh_edge + ff_edge
+        av_edge = rv_edge + ff_edge
        #pv_edge = av_edge / hh_edge
         pv_edge = \
             limit_div(av_edge, hh_edge, hh_tiny)
 
-        pv_edge = upwind_SV(
+        pv_edge = upwinding(
             mesh, trsk, cnfg, 
             pv_dual, pv_cell, pv_edge, 
-            uu_edge, vv_edge, delta_t, pv_damp)
+            uu_edge, vv_edge, delta_t, up_bias)
 
     if (cnfg.operators == "TRSK-MD"):
 
@@ -812,10 +931,10 @@ def computePV(mesh, trsk, cnfg,
         pv_edge = trsk.edge_vert_sums * pv_dual
         pv_edge*= 0.5E+00
 
-        pv_edge = upwind_SV(
+        pv_edge = upwinding(
             mesh, trsk, cnfg, 
             pv_dual, pv_cell, pv_edge, 
-            uu_edge, vv_edge, delta_t, pv_damp)
+            uu_edge, vv_edge, delta_t, up_bias)
 
     ttoc = time.time()
     tcpu.computePV = tcpu.computePV + (ttoc - ttic)
@@ -824,77 +943,9 @@ def computePV(mesh, trsk, cnfg,
            pv_edge
 
 
-def upwind_SV(mesh, trsk, cnfg, sv_dual, sv_cell, sv_edge,
-              uu_edge, vv_edge, 
-              delta_t, sv_damp):
-
-    ttic = time.time()
-
-    if (cnfg.pv_scheme == "LUST"):
-
-    #-- upwind bias, a'la Weller
-    #-- H. Weller (2012): Controlling the computational modes 
-    #-- of the arbitrarily structured C grid
-    #-- https://doi.org/10.1175/MWR-D-11-00221.1
-        gv_edge = trsk.edge_grad_perp * sv_dual
-
-        gx_dual = trsk.dual_lsqr_xprp * gv_edge
-        gy_dual = trsk.dual_lsqr_yprp * gv_edge
-        gz_dual = trsk.dual_lsqr_zprp * gv_edge
-
-        up_edge = vv_edge >= 0.0
-        dn_edge = vv_edge <= 0.0
-
-        up_dual = np.zeros(
-            mesh.edge.size, dtype=np.int32)
-        up_dual[up_edge] = \
-            mesh.edge.vert[up_edge, 1] - 1
-        up_dual[dn_edge] = \
-            mesh.edge.vert[dn_edge, 0] - 1
-
-        up_xdel = \
-            mesh.edge.xmid - mesh.vert.xmid[up_dual]
-        up_ydel = \
-            mesh.edge.ymid - mesh.vert.ymid[up_dual]
-        up_zdel = \
-            mesh.edge.zmid - mesh.vert.zmid[up_dual]
-
-        ZERO = 1.E-12 * np.max(uu_edge)
-
-        va_edge = np.abs(vv_edge) + ZERO
-        ua_edge = np.abs(uu_edge) + ZERO
-        
-        BIAS = (
-            +1. / 5. * va_edge / (ua_edge + va_edge)
-        )
-
-        sv_wind = sv_dual[up_dual] + \
-            up_xdel * gx_dual[up_dual] + \
-            up_ydel * gy_dual[up_dual] + \
-            up_zdel * gz_dual[up_dual]
-
-        sv_edge = \
-            BIAS * sv_wind + (1.0 - BIAS) * sv_edge
-
-    if (cnfg.pv_scheme == "APVM"):
-
-    #-- upwind APVM, a'la Ringler
-        gn_edge = trsk.edge_grad_norm * sv_cell * +1.
-        gp_edge = trsk.edge_grad_perp * sv_dual * -1.
-
-        sv_apvm = sv_damp * uu_edge * gn_edge + \
-                  sv_damp * vv_edge * gp_edge
-
-        sv_edge = sv_edge - delta_t * sv_apvm
-        
-    ttoc = time.time()
-    tcpu.upwind_PV = tcpu.upwind_PV + (ttoc - ttic)
-
-    return sv_edge
-
-
 def computeKE(mesh, trsk, cnfg, 
-              hh_cell, hh_edge, hh_dual, uu_edge, vv_edge):
+              hh_cell, hh_edge, hh_dual, uu_edge, vv_edge,
+              delta_t, up_bias):
 
     ttic = time.time()
 
@@ -902,28 +953,29 @@ def computeKE(mesh, trsk, cnfg,
 
         if ("CENTRE" in cnfg.ke_scheme):
 
-            ke_edge = \
-                0.5 * (uu_edge ** 2 + vv_edge ** 2)
+            ke_edge = 0.5 * (uu_edge ** 2 + 
+                             vv_edge ** 2 )
 
         if ("UPWIND" in cnfg.ke_scheme):
 
-            ul_edge = trsk.edge_lsqr_lnrm * uu_edge
-            ur_edge = trsk.edge_lsqr_rnrm * uu_edge
+            ke_edge = 0.5 * (uu_edge ** 2 + 
+                             vv_edge ** 2 )
 
-            uu_wind = np.zeros(
-                mesh.edge.size, dtype=uu_edge.dtype)      
+            ux_dual = trsk.dual_lsqr_xnrm * uu_edge
+            uy_dual = trsk.dual_lsqr_ynrm * uu_edge
+            uz_dual = trsk.dual_lsqr_znrm * uu_edge
 
-            up_mark = np.where(uu_edge < 0.0)
-            uu_wind[up_mark] = ur_edge[up_mark]
+            ke_dual = 0.5 * (ux_dual ** 2 + 
+                             uy_dual ** 2 + 
+                             uz_dual ** 2 )
+            
+            ke_cell = trsk.cell_kite_sums * ke_dual
+            ke_cell/= mesh.cell.area
 
-            up_mark = np.where(uu_edge > 0.0)
-            uu_wind[up_mark] = ul_edge[up_mark]
-
-            uu_wind = (0.0 + 1.0 / 3.0) * uu_wind \
-                    + (1.0 - 1.0 / 3.0) * uu_edge
-
-            ke_edge = \
-                0.5 * (uu_wind ** 2 + vv_edge ** 2)
+            ke_edge = upwinding(
+                mesh, trsk, cnfg, 
+                ke_dual, ke_cell, ke_edge, 
+                uu_edge, vv_edge, delta_t, up_bias)
 
         if ("WEIGHT" in cnfg.ke_scheme):
 
@@ -960,22 +1012,25 @@ def computeKE(mesh, trsk, cnfg,
 
         if ("UPWIND" in cnfg.ke_scheme):
 
-            ul_edge = trsk.edge_lsqr_lnrm * uu_edge
-            ur_edge = trsk.edge_lsqr_rnrm * uu_edge
+            ke_edge = 1.00 * uu_edge ** 2
 
-            uu_wind = np.zeros(
-                mesh.edge.size, dtype=uu_edge.dtype)  
+            ux_dual = trsk.dual_lsqr_xnrm * uu_edge
+            uy_dual = trsk.dual_lsqr_ynrm * uu_edge
+            uz_dual = trsk.dual_lsqr_znrm * uu_edge
 
-            up_mark = np.where(uu_edge < 0.0)
-            uu_wind[up_mark] = ur_edge[up_mark]
+            ke_dual = 0.5 * (ux_dual ** 2 + 
+                             uy_dual ** 2 + 
+                             uz_dual ** 2 )
+            
+            ke_cell = trsk.cell_kite_sums * ke_dual
+            ke_cell/= mesh.cell.area
 
-            up_mark = np.where(uu_edge > 0.0)
-            uu_wind[up_mark] = ul_edge[up_mark]
+            ke_edge = upwinding(
+                mesh, trsk, cnfg, 
+                ke_dual, ke_cell, ke_edge, 
+                uu_edge, vv_edge, delta_t, up_bias)
 
-            uu_wind = (0.0 + 1.0 / 3.0) * uu_wind \
-                    + (1.0 - 1.0 / 3.0) * uu_edge
-
-            ke_edge = 0.25 * uu_wind ** 2 * \
+            ke_edge = 0.25 * ke_edge ** 1 * \
                   mesh.edge.clen * \
                   mesh.edge.vlen
 
@@ -1007,17 +1062,6 @@ def computeKE(mesh, trsk, cnfg,
             ke_cell = trsk.cell_edge_sums * ke_edge
             ke_cell/= mesh.cell.area
 
-            # Gassmann stencil, a'la MPAS-O/MPAS-A
-            """
-            ke_dual = trsk.dual_edge_sums * ke_edge
-            ke_dual/= mesh.vert.area
-
-            k2_cell = trsk.cell_kite_sums * ke_dual
-            k2_cell/= mesh.cell.area
-
-            ke_cell = (0.0 + 5.0 / 8.0) * ke_cell \
-                      (1.0 - 5.0 / 8.0) * k2_cell
-            """
 
     ttoc = time.time()
     tcpu.computeKE = tcpu.computeKE + (ttoc - ttic)
@@ -1059,21 +1103,27 @@ if (__name__ == "__main__"):
 
     parser.add_argument(
         "--integrate", dest="integrate", type=str,
-        default="RK32-FB",
+        default="RK22-FB",
         required=False, 
-        help="Time integration = {RK32-FB}, RK22-FB.")
+        help="Time integration = {RK22-FB}, RK32-FB.")
 
     parser.add_argument(
-        "--pv-scheme", dest="pv_scheme", type=str,
-        default="APVM",
+        "--up-scheme", dest="up_scheme", type=str,
+        default="AUST",
         required=False, 
-        help="PV.-flux formulation = {APVM}, LUST.")
+        help="Up-stream formulation = {AUST}, APVM, LUST.")
 
     parser.add_argument(
-        "--apvm-beta", dest="apvm_beta", type=float,
-        default=.5E+00,
-        required=False, 
-        help="APVM multipling coeff. {BETA = 0.5}.")
+        "--pv-upwind", dest="pv_upwind", type=float,
+        default=1./11.,
+        required=False,
+        help="Upwind PV.-flux bias {BIAS = 1./11.0}.")
+    
+    parser.add_argument(
+        "--ke-upwind", dest="ke_upwind", type=float,
+        default=1./15.,
+        required=False,
+        help="Upwind KE.-edge bias {BIAS = 1./15.0}.")
 
     parser.add_argument(
         "--ke-scheme", dest="ke_scheme", type=str,
