@@ -31,6 +31,8 @@ def trsk_mats(mesh):
     DUAL-EDGE-SUMS: edge-to-dual summation
     DUAL-DEL2-SUMS: dual del-squared (* area)
 
+    QUAD-CURL-SUMS: curl integration (* area)
+
     EDGE-FLUX-PERP: reconstruct u (perpendicular)
     EDGE-LSQR-PERP: reconstruct u (perpendicular)
 
@@ -38,6 +40,11 @@ def trsk_mats(mesh):
     CELL-LSQR-XNRM: reconstruct U (cartesian)
     CELL-LSQR-YNRM: reconstruct Y (cartesian)
     CELL-LSQR-ZNRM: reconstruct Z (cartesian)
+
+    (from norm. components)
+    EDGE-LSQR-XNRM: reconstruct U (cartesian)
+    EDGE-LSQR-YNRM: reconstruct Y (cartesian)
+    EDGE-LSQR-ZNRM: reconstruct Z (cartesian)
 
     (from norm. components)
     DUAL-LSQR-XNRM: reconstruct U (cartesian)
@@ -55,6 +62,9 @@ def trsk_mats(mesh):
     class base: pass
 
     trsk = base()
+    trsk.cell_edge_sign = cell_edge_sign(mesh)
+    trsk.dual_edge_sign = dual_edge_sign(mesh)
+
     trsk.cell_flux_sums = cell_flux_sums(mesh)
     trsk.cell_kite_sums = cell_kite_sums(mesh)
     trsk.cell_wing_sums = cell_wing_sums(mesh)
@@ -80,9 +90,19 @@ def trsk_mats(mesh):
 
     trsk.dual_del2_sums = dual_del2_sums(mesh)
 
+    # take curl on rhombi, a'la Gassmann
+    trsk.quad_curl_sums = trsk.edge_vert_sums \
+                        * trsk.dual_curl_sums
+    trsk.quad_curl_sums.setdiag(0.0)
+    trsk.quad_curl_sums.eliminate_zeros()
+
     trsk.cell_lsqr_xnrm, \
     trsk.cell_lsqr_ynrm, \
     trsk.cell_lsqr_znrm = cell_lsqr_fxyz(mesh)
+
+    trsk.edge_lsqr_xnrm, \
+    trsk.edge_lsqr_ynrm, \
+    trsk.edge_lsqr_znrm = edge_lsqr_fxyz(mesh)
     
     trsk.dual_lsqr_xnrm, \
     trsk.dual_lsqr_ynrm, \
@@ -90,100 +110,71 @@ def trsk_mats(mesh):
     trsk.dual_lsqr_xprp, \
     trsk.dual_lsqr_yprp, \
     trsk.dual_lsqr_zprp = dual_lsqr_fxyz(mesh)
-    
+ 
+    # ensure flux reconstruction operator is exactly
+    # skew-symmetric. Per Ringler et al, 2010, W_prp
+    # is required to be anti-symmetric to ensure
+    # energetically neutral PV fluxes: W_ij = -W_ji.
+    # Due to floating-point round-off!
     trsk.edge_flux_perp = edge_flux_perp(mesh)
 
+    lmat = spdiags(
+        1./mesh.edge.vlen, 
+        0, mesh.edge.size, mesh.edge.size)
+
+    dmat = spdiags(
+        1.*mesh.edge.dlen, 
+        0, mesh.edge.size, mesh.edge.size)
+
+    wmat = dmat * trsk.edge_flux_perp * lmat
+
+    wmat = 0.5 * (wmat - wmat.transpose())
+
+    lmat = spdiags(
+        1.*mesh.edge.vlen,
+        0, mesh.edge.size, mesh.edge.size)
+
+    dmat = spdiags(
+        1./mesh.edge.clen, 
+        0, mesh.edge.size, mesh.edge.size)
+
+    trsk.edge_flux_perp = dmat * wmat * lmat
 
     # ensure remapping is always at worst dissipative
     # due to floating-point round-off!
     # this modifies the mesh data-structure in-place.
-    mesh.vert.area = np.maximum(
-        trsk.dual_kite_sums * np.ones(mesh.cell.size),
-        trsk.dual_stub_sums * np.ones(mesh.edge.size)
+    crhs = np.ones(
+        mesh.cell.size, dtype=np.float64)
+    erhs = np.ones(
+        mesh.edge.size, dtype=np.float64)
+    vrhs = np.ones(
+        mesh.vert.size, dtype=np.float64)
+
+    mesh.vert.area = 0.5 * (
+        trsk.dual_kite_sums * crhs +
+        trsk.dual_stub_sums * erhs
     )
 
-    mesh.edge.area = np.maximum(
-        trsk.edge_wing_sums * np.ones(mesh.cell.size),
-        trsk.edge_stub_sums * np.ones(mesh.vert.size)
+    mesh.edge.area = 0.5 * (
+        trsk.edge_wing_sums * crhs +
+        trsk.edge_stub_sums * vrhs
     )
 
-    mesh.cell.area = np.maximum(
-        trsk.cell_wing_sums * np.ones(mesh.edge.size),
-        trsk.cell_kite_sums * np.ones(mesh.vert.size)
+    mesh.cell.area = 0.5 * (
+        trsk.cell_wing_sums * erhs +
+        trsk.cell_kite_sums * vrhs
     )
 
+    mesh.quad = base()
+    mesh.quad.area = \
+        trsk.edge_vert_sums * mesh.vert.area
 
     # build LSQR-PERP from edge-wise reconstructions
-    area = spdiags(1.0 / mesh.edge.area, 0, 
-                   mesh.edge.size, mesh.edge.size)
-
-    xhat = (
-        mesh.vert.xpos[mesh.edge.vert[:, 1] - 1] -
-        mesh.vert.xpos[mesh.edge.vert[:, 0] - 1]
+    trsk.edge_lsqr_perp = +1.0 * (
+        mesh.edge.xprp * trsk.edge_lsqr_xnrm +
+        mesh.edge.yprp * trsk.edge_lsqr_ynrm +
+        mesh.edge.zprp * trsk.edge_lsqr_znrm 
     )
-    yhat = (
-        mesh.vert.ypos[mesh.edge.vert[:, 1] - 1] -
-        mesh.vert.ypos[mesh.edge.vert[:, 0] - 1]
-    )
-    zhat = (
-        mesh.vert.zpos[mesh.edge.vert[:, 1] - 1] -
-        mesh.vert.zpos[mesh.edge.vert[:, 0] - 1]
-    )
-
-    lhat = xhat ** 2 + yhat ** 2 + zhat ** 2
-    lhat = np.sqrt(lhat)
-
-    xhat = spdiags(xhat / lhat, 0, 
-                   mesh.edge.size, mesh.edge.size)
-    yhat = spdiags(yhat / lhat, 0, 
-                   mesh.edge.size, mesh.edge.size)
-    zhat = spdiags(zhat / lhat, 0, 
-                   mesh.edge.size, mesh.edge.size)
-
-    trsk.edge_lsqr_perp = -1. * area * (
-        xhat * trsk.edge_wing_sums * 
-               trsk.cell_lsqr_xnrm +
-        yhat * trsk.edge_wing_sums *
-               trsk.cell_lsqr_ynrm +
-        zhat * trsk.edge_wing_sums *
-               trsk.cell_lsqr_znrm )
-
-    # build LSQR-GRAD for apvm-style reconstructions
-    xhat = (
-        mesh.cell.xpos[mesh.edge.cell[:, 1] - 1] -
-        mesh.cell.xpos[mesh.edge.cell[:, 0] - 1]
-    )
-    yhat = (
-        mesh.cell.ypos[mesh.edge.cell[:, 1] - 1] -
-        mesh.cell.ypos[mesh.edge.cell[:, 0] - 1]
-    )
-    zhat = (
-        mesh.cell.zpos[mesh.edge.cell[:, 1] - 1] -
-        mesh.cell.zpos[mesh.edge.cell[:, 0] - 1]
-    )
-
-    lhat = xhat ** 2 + yhat ** 2 + zhat ** 2
-    lhat = np.sqrt(lhat)
-
-    xhat = spdiags(xhat / lhat, 0, 
-                   mesh.edge.size, mesh.edge.size)
-    yhat = spdiags(yhat / lhat, 0, 
-                   mesh.edge.size, mesh.edge.size)
-    zhat = spdiags(zhat / lhat, 0, 
-                   mesh.edge.size, mesh.edge.size)
-
-    trsk.apvm_grad_norm = -1. * area * (
-        xhat * trsk.edge_stub_sums * 
-               trsk.dual_lsqr_xprp * 
-               trsk.edge_grad_perp +
-        yhat * trsk.edge_stub_sums * 
-               trsk.dual_lsqr_yprp * 
-               trsk.edge_grad_perp +
-        zhat * trsk.edge_stub_sums * 
-               trsk.dual_lsqr_zprp * 
-               trsk.edge_grad_perp )
-
-    trsk.apvm_grad_perp = trsk.edge_grad_perp
 
     return trsk
 
@@ -268,25 +259,6 @@ def cell_curl_sums(mesh):
         vidx = mesh.cell.vert[mask, edge] - 1
         eidx = mesh.cell.edge[mask, edge] - 1
 
-        # to ensure curl(grad(h)) = 0
-        clen = mesh.edge.clen[eidx]
-        area = mesh.edge.area[eidx] * +2.
-
-        scal = area / clen
-
-        v1st = mesh.edge.vert[eidx, 0] - 1
-
-        okay = vidx != v1st
-        flip = vidx == v1st
-
-        ivec = np.hstack((
-            ivec, +cidx[flip], cidx[okay]))
-        jvec = np.hstack((
-            jvec, +eidx[flip], eidx[okay]))
-        xvec = np.hstack((
-            xvec, -scal[flip], scal[okay]))
-
-        """
         vlen = mesh.edge.vlen[eidx]
 
         v1st = mesh.edge.vert[eidx, 0] - 1
@@ -300,8 +272,7 @@ def cell_curl_sums(mesh):
             jvec, +eidx[flip], eidx[okay]))
         xvec = np.hstack((
             xvec, -vlen[flip], vlen[okay]))
-        """
-
+        
     return csr_matrix((xvec, (ivec, jvec)))
 
 
@@ -457,23 +428,12 @@ def edge_grad_norm(mesh):
 
     eidx = np.arange(+0, mesh.edge.size)
 
-    # does ensuring grad = -1.0 * div ^ T help?
-    vlen = mesh.edge.vlen
-    area = mesh.edge.area * +2.
-
-    ivec = np.concatenate((eidx, eidx))
-    jvec = np.concatenate((icel, jcel))
-    xvec = np.concatenate(
-        (-1. * vlen / area, +1. * vlen / area))
-
-    """
     clen = mesh.edge.clen
 
     ivec = np.concatenate((eidx, eidx))
     jvec = np.concatenate((icel, jcel))
     xvec = np.concatenate(
         (-1.E+0 / clen, +1.E+0 / clen))
-    """
     
     return csr_matrix((xvec, (ivec, jvec)))
 
@@ -489,24 +449,20 @@ def edge_grad_perp(mesh):
 
     eidx = np.arange(+0, mesh.edge.size)
 
-    clen = mesh.edge.clen
-    area = mesh.edge.area * +2.
-
-    ivec = np.concatenate((eidx, eidx))
-    jvec = np.concatenate((inod, jnod))
-    xvec = np.concatenate(
-        (-1. * clen / area, +1. * clen / area))
-
-    """
     vlen = mesh.edge.vlen
 
     ivec = np.concatenate((eidx, eidx))
     jvec = np.concatenate((inod, jnod))
     xvec = np.concatenate(
         (-1.E+0 / vlen, +1.E+0 / vlen))
-    """
     
     return csr_matrix((xvec, (ivec, jvec)))
+
+
+def edge_vals_perp(mesh):
+
+
+    return wmul
 
 
 def edge_flux_perp(mesh):
@@ -514,7 +470,7 @@ def edge_flux_perp(mesh):
 #-- EDGE-FLUX-PERP: returns f_perp, via the TRSK-type scheme
 #-- for edges sandwiched between cells.
 #-- Use f_perp = OP * f_nrm to reconstruct the perpendicular
-#-- component of a vector field F.
+#-- component of a vector field F. 
 
     xvec = np.array([], dtype=np.float64)
     ivec = np.array([], dtype=np.int32)
@@ -577,25 +533,6 @@ def dual_curl_sums(mesh):
         eidx = mesh.vert.edge[:, edge] - 1
         cidx = mesh.vert.cell[:, edge] - 1
 
-        # to ensure curl(grad(h)) = 0
-        vlen = mesh.edge.vlen[eidx]
-        area = mesh.edge.area[eidx] * +2.
-
-        scal = area / vlen
-
-        c1st = mesh.edge.cell[eidx, 0] - 1
-
-        okay = cidx != c1st
-        flip = cidx == c1st
-
-        ivec = np.hstack((
-            ivec, +vidx[flip], vidx[okay]))
-        jvec = np.hstack((
-            jvec, +eidx[flip], eidx[okay]))
-        xvec = np.hstack((
-            xvec, -scal[flip], scal[okay]))
-
-        """
         clen = mesh.edge.clen[eidx]
 
         c1st = mesh.edge.cell[eidx, 0] - 1
@@ -609,8 +546,7 @@ def dual_curl_sums(mesh):
             jvec, +eidx[flip], eidx[okay]))
         xvec = np.hstack((
             xvec, -clen[flip], clen[okay]))
-        """
-
+        
     return csr_matrix((xvec, (ivec, jvec)))
 
 
@@ -746,8 +682,8 @@ def dual_lsqr_fxyz(mesh):
     pdir = pdir / plen
 
     dnrm = np.vstack((
-        mesh.vert.xmid, 
-        mesh.vert.ymid, mesh.vert.zmid)).T
+        mesh.vert.xpos, 
+        mesh.vert.ypos, mesh.vert.zpos)).T
     
     dnrm = dnrm / RSPH
     
@@ -859,26 +795,37 @@ def dual_lsqr_fxyz(mesh):
 def cell_lsqr_fxyz(mesh):
 
     cnrm = np.vstack((
-        mesh.cell.xmid,
-        mesh.cell.ymid, mesh.cell.zmid)).T
+        mesh.cell.xpos,
+        mesh.cell.ypos, mesh.cell.zpos)).T
     
     cnrm = cnrm / mesh.rsph
+
+    edir = np.vstack((
+        mesh.cell.xpos[mesh.edge.cell[:, 1] - 1] -
+        mesh.cell.xpos[mesh.edge.cell[:, 0] - 1],
+        mesh.cell.ypos[mesh.edge.cell[:, 1] - 1] -
+        mesh.cell.ypos[mesh.edge.cell[:, 0] - 1],
+        mesh.cell.zpos[mesh.edge.cell[:, 1] - 1] -
+        mesh.cell.zpos[mesh.edge.cell[:, 0] - 1]))
+    edir = edir.T
+
+    elen = np.sqrt(np.sum(
+        edir ** 2, axis=1, keepdims=True))
+
+    edir = edir / elen
     
     Tmat = np.zeros(
         (np.max(mesh.cell.topo) + 1, 3, 
-            mesh.cell.size), dtype=np.float64)
+         mesh.cell.size), dtype=np.float64)
 
     Wmat = np.zeros(
         (np.max(mesh.cell.topo) + 1,
-            np.max(mesh.cell.topo) + 1,
-            mesh.cell.size), dtype=np.float64)
-
-    sign = cell_edge_sign(mesh)
+         np.max(mesh.cell.topo) + 1,
+         mesh.cell.size), dtype=np.float64)
 
     for edge in range(np.max(mesh.cell.topo) + 1):
 
-        Wmat[edge, edge, :] = \
-            1.0 / np.sqrt(mesh.cell.area).T
+        Wmat[edge, edge, :] = mesh.cell.area.T
 
     for edge in range(np.max(mesh.cell.topo) + 0):
 
@@ -886,24 +833,11 @@ def cell_lsqr_fxyz(mesh):
 
         eidx = mesh.cell.edge[mask, edge] - 1
 
-        edir = np.vstack((
-            mesh.cell.xpos[mask] -
-            mesh.edge.xpos[eidx],
-            mesh.cell.ypos[mask] -
-            mesh.edge.ypos[eidx],
-            mesh.cell.zpos[mask] -
-            mesh.edge.zpos[eidx]))
-        edir = edir.T
+        area = mesh.edge.area[eidx].T
 
-        elen = np.sqrt(np.sum(
-            edir ** 2, axis=1, keepdims=True))
+        Wmat[edge, edge, mask] = area
 
-        edir = edir / elen
-
-        Wmat[edge, edge, mask] = 1.0 / elen.T
-
-        Tmat[edge, :, mask] = \
-            (sign[mask, edge] * edir.T).T
+        Tmat[edge,    :, mask] = edir[eidx]
     
     Tmat[-1, :, :] = np.transpose(cnrm)
 
@@ -951,6 +885,246 @@ def cell_lsqr_fxyz(mesh):
         ) / Rdet[M]
 
         ivec = np.hstack((ivec, cidx))
+        jvec = np.hstack((jvec, eidx))
+        xvec = np.hstack((xvec, xmul))
+        yvec = np.hstack((yvec, ymul))
+        zvec = np.hstack((zvec, zmul))
+
+    return csr_matrix((xvec, (ivec, jvec))), \
+           csr_matrix((yvec, (ivec, jvec))), \
+           csr_matrix((zvec, (ivec, jvec)))
+
+"""
+def edge_lsqr_fxyz(mesh):
+#-- edge reconstruction via "small" tria-based stencil
+
+    enrm = np.vstack((
+        mesh.edge.xpos,
+        mesh.edge.ypos, mesh.edge.zpos)).T
+    
+    enrm = enrm / mesh.rsph
+
+    edir = np.vstack((
+        mesh.cell.xpos[mesh.edge.cell[:, 1] - 1] -
+        mesh.cell.xpos[mesh.edge.cell[:, 0] - 1],
+        mesh.cell.ypos[mesh.edge.cell[:, 1] - 1] -
+        mesh.cell.ypos[mesh.edge.cell[:, 0] - 1],
+        mesh.cell.zpos[mesh.edge.cell[:, 1] - 1] -
+        mesh.cell.zpos[mesh.edge.cell[:, 0] - 1]))
+    edir = edir.T
+
+    elen = np.sqrt(np.sum(
+        edir ** 2, axis=1, keepdims=True))
+
+    edir = edir / elen
+
+    topo = np.zeros(
+        (mesh.edge.size, 4), dtype=np.int32)
+
+    next = np.zeros(
+        (mesh.edge.size, 1), dtype=np.int32)
+
+    Tmat = np.zeros(
+        (5, 3, mesh.edge.size), dtype=np.float64)
+
+    Wmat = np.zeros(
+        (5, 5, mesh.edge.size), dtype=np.float64)
+
+    for edge in range(3):
+
+        ivrt = mesh.edge.vert[:, 0] - 1
+        jvrt = mesh.edge.vert[:, 1] - 1
+
+    #-- add non-self edge from ivrt
+        eidx = mesh.vert.edge[ivrt, edge] - 1
+
+        enum = np.arange(0, mesh.edge.size)
+
+        keep = eidx != enum
+
+        topo[keep, next[keep, 0]] = eidx[keep]
+        next[keep, 0] += 1
+
+    #-- add non-self edge from jvrt
+        eidx = mesh.vert.edge[jvrt, edge] - 1
+
+        enum = np.arange(0, mesh.edge.size)
+
+        keep = eidx != enum
+
+        topo[keep, next[keep, 0]] = eidx[keep]
+        next[keep, 0] += 1
+
+    for edge in range(5):
+
+        Wmat[edge, edge, :] = +1.0  # unweighted
+
+    for edge in range(4):
+
+        mask = np.full(
+            mesh.edge.size, True, dtype=bool)
+
+        eidx = topo[mask, edge] - 0
+
+        area = mesh.edge.area[eidx].T
+
+        Wmat[edge, edge, mask] = +1.0  # unweighted
+
+        Tmat[edge,    :, mask] = edir[eidx]
+    
+    Tmat[-1, :, :] = np.transpose(enrm)
+    
+
+    matT = np.transpose(Tmat, axes=(1, 0, 2))
+
+    matW = np.einsum(
+        "ik..., kj... -> ij...", matT, Wmat)
+
+    Rmat = np.einsum(
+        "ik..., kj... -> ij...", matW, Tmat)
+
+    Rinv, Rdet = inv_3x3(Rmat)
+
+    xvec = np.array([], dtype=np.float64)
+    yvec = np.array([], dtype=np.float64)
+    zvec = np.array([], dtype=np.float64)
+    ivec = np.array([], dtype=np.int32)
+    jvec = np.array([], dtype=np.int32)
+
+    for edge in range(4):
+
+        mask = np.full(
+            mesh.edge.size, True, dtype=bool)
+
+        enum = np.argwhere(mask).ravel()
+
+        eidx = topo[mask, edge] - 0
+
+        M = mask
+        xmul = (
+            Rinv[0, 0, M] * matW[0, edge, M] +
+            Rinv[0, 1, M] * matW[1, edge, M] +
+            Rinv[0, 2, M] * matW[2, edge, M]
+        ) / Rdet[M]
+
+        ymul = (
+            Rinv[1, 0, M] * matW[0, edge, M] +
+            Rinv[1, 1, M] * matW[1, edge, M] +
+            Rinv[1, 2, M] * matW[2, edge, M]
+        ) / Rdet[M]
+
+        zmul = (
+            Rinv[2, 0, M] * matW[0, edge, M] +
+            Rinv[2, 1, M] * matW[1, edge, M] +
+            Rinv[2, 2, M] * matW[2, edge, M]
+        ) / Rdet[M]
+
+        ivec = np.hstack((ivec, enum))
+        jvec = np.hstack((jvec, eidx))
+        xvec = np.hstack((xvec, xmul))
+        yvec = np.hstack((yvec, ymul))
+        zvec = np.hstack((zvec, zmul))
+
+    return csr_matrix((xvec, (ivec, jvec))), \
+           csr_matrix((yvec, (ivec, jvec))), \
+           csr_matrix((zvec, (ivec, jvec)))
+"""
+
+def edge_lsqr_fxyz(mesh):
+#-- edge reconstruction via "large" cell-based stencil
+
+    enrm = np.vstack((
+        mesh.edge.xpos,
+        mesh.edge.ypos, mesh.edge.zpos)).T
+    
+    enrm = enrm / mesh.rsph
+
+    edir = np.vstack((
+        mesh.cell.xpos[mesh.edge.cell[:, 1] - 1] -
+        mesh.cell.xpos[mesh.edge.cell[:, 0] - 1],
+        mesh.cell.ypos[mesh.edge.cell[:, 1] - 1] -
+        mesh.cell.ypos[mesh.edge.cell[:, 0] - 1],
+        mesh.cell.zpos[mesh.edge.cell[:, 1] - 1] -
+        mesh.cell.zpos[mesh.edge.cell[:, 0] - 1]))
+    edir = edir.T
+
+    elen = np.sqrt(np.sum(
+        edir ** 2, axis=1, keepdims=True))
+
+    edir = edir / elen
+
+    Tmat = np.zeros(
+        (np.max(mesh.edge.topo) + 1, 3,
+         mesh.edge.size), dtype=np.float64)
+
+    Wmat = np.zeros(
+        (np.max(mesh.edge.topo) + 1, 
+         np.max(mesh.edge.topo) + 1, 
+         mesh.edge.size), dtype=np.float64)
+
+    for edge in range(np.max(mesh.edge.topo) + 1):
+
+        Wmat[edge, edge, :] = mesh.edge.area.T
+
+    for edge in range(np.max(mesh.edge.topo) + 0):
+
+        mask = mesh.edge.topo > edge
+
+        eidx = mesh.edge.edge[mask, edge] - 1
+
+        area = mesh.edge.area[eidx].T
+
+        Wmat[edge, edge, mask] = area
+
+        Tmat[edge,    :, mask] = edir[eidx]
+    
+    Tmat[-1, :, :] = np.transpose(enrm)
+    
+
+    matT = np.transpose(Tmat, axes=(1, 0, 2))
+
+    matW = np.einsum(
+        "ik..., kj... -> ij...", matT, Wmat)
+
+    Rmat = np.einsum(
+        "ik..., kj... -> ij...", matW, Tmat)
+
+    Rinv, Rdet = inv_3x3(Rmat)
+
+    xvec = np.array([], dtype=np.float64)
+    yvec = np.array([], dtype=np.float64)
+    zvec = np.array([], dtype=np.float64)
+    ivec = np.array([], dtype=np.int32)
+    jvec = np.array([], dtype=np.int32)
+
+    for edge in range(np.max(mesh.edge.topo) + 0):
+
+        mask = mesh.edge.topo > edge
+
+        enum = np.argwhere(mask).ravel()
+
+        eidx = mesh.edge.edge[mask, edge] - 1
+
+        M = mask
+        xmul = (
+            Rinv[0, 0, M] * matW[0, edge, M] +
+            Rinv[0, 1, M] * matW[1, edge, M] +
+            Rinv[0, 2, M] * matW[2, edge, M]
+        ) / Rdet[M]
+
+        ymul = (
+            Rinv[1, 0, M] * matW[0, edge, M] +
+            Rinv[1, 1, M] * matW[1, edge, M] +
+            Rinv[1, 2, M] * matW[2, edge, M]
+        ) / Rdet[M]
+
+        zmul = (
+            Rinv[2, 0, M] * matW[0, edge, M] +
+            Rinv[2, 1, M] * matW[1, edge, M] +
+            Rinv[2, 2, M] * matW[2, edge, M]
+        ) / Rdet[M]
+
+        ivec = np.hstack((ivec, enum))
         jvec = np.hstack((jvec, eidx))
         xvec = np.hstack((xvec, xmul))
         yvec = np.hstack((yvec, ymul))

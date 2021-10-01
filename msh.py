@@ -1,6 +1,7 @@
 
 import numpy as np
 from netCDF4 import Dataset
+from scipy.sparse import csr_matrix, spdiags
 
 
 def load_mesh(name, rsph=None):
@@ -31,8 +32,8 @@ def load_mesh(name, rsph=None):
     mesh.cell.zpos = np.array(data.variables["zCell"]) * scal
     mesh.cell.xlon = np.array(data.variables["lonCell"])
     mesh.cell.ylat = np.array(data.variables["latCell"])
-    mesh.cell.area = \
-        np.array(data.variables["areaCell"]) * scal ** 2
+   #mesh.cell.area = \
+   #    np.array(data.variables["areaCell"]) * scal ** 2
     mesh.cell.vert = \
         np.array(data.variables["verticesOnCell"])
     mesh.cell.edge = \
@@ -49,8 +50,8 @@ def load_mesh(name, rsph=None):
     mesh.edge.zpos = np.array(data.variables["zEdge"]) * scal
     mesh.edge.xlon = np.array(data.variables["lonEdge"])
     mesh.edge.ylat = np.array(data.variables["latEdge"])
-    mesh.edge.vlen = np.array(data.variables["dvEdge"]) * scal
-    mesh.edge.clen = np.array(data.variables["dcEdge"]) * scal
+   #mesh.edge.vlen = np.array(data.variables["dvEdge"]) * scal
+   #mesh.edge.clen = np.array(data.variables["dcEdge"]) * scal
     mesh.edge.vert = \
         np.array(data.variables["verticesOnEdge"])
     mesh.edge.wmul = \
@@ -69,14 +70,60 @@ def load_mesh(name, rsph=None):
     mesh.vert.zpos = np.array(data.variables["zVertex"]) * scal
     mesh.vert.xlon = np.array(data.variables["lonVertex"])
     mesh.vert.ylat = np.array(data.variables["latVertex"])
-    mesh.vert.area = \
-        np.array(data.variables["areaTriangle"]) * scal ** 2
-    mesh.vert.kite = \
-        np.array(data.variables["kiteAreasOnVertex"]) * scal ** 2
+   #mesh.vert.area = \
+   #    np.array(data.variables["areaTriangle"]) * scal ** 2
+   #mesh.vert.kite = \
+   #    np.array(data.variables["kiteAreasOnVertex"]) * scal ** 2
     mesh.vert.edge = \
         np.array(data.variables["edgesOnVertex"])
     mesh.vert.cell = \
         np.array(data.variables["cellsOnVertex"])
+
+
+    xhat = (
+        mesh.vert.xpos[mesh.edge.vert[:, 1] - 1] -
+        mesh.vert.xpos[mesh.edge.vert[:, 0] - 1]
+    )
+    yhat = (
+        mesh.vert.ypos[mesh.edge.vert[:, 1] - 1] -
+        mesh.vert.ypos[mesh.edge.vert[:, 0] - 1]
+    )
+    zhat = (
+        mesh.vert.zpos[mesh.edge.vert[:, 1] - 1] -
+        mesh.vert.zpos[mesh.edge.vert[:, 0] - 1]
+    )
+
+    lhat = np.sqrt(xhat ** 2 + yhat ** 2 + zhat ** 2)
+    
+    mesh.edge.xprp = spdiags(
+        xhat / lhat, 0, mesh.edge.size, mesh.edge.size)
+    mesh.edge.yprp = spdiags(
+        yhat / lhat, 0, mesh.edge.size, mesh.edge.size)
+    mesh.edge.zprp = spdiags(
+        zhat / lhat, 0, mesh.edge.size, mesh.edge.size)
+
+
+    xhat = (
+        mesh.cell.xpos[mesh.edge.cell[:, 1] - 1] -
+        mesh.cell.xpos[mesh.edge.cell[:, 0] - 1]
+    )
+    yhat = (
+        mesh.cell.ypos[mesh.edge.cell[:, 1] - 1] -
+        mesh.cell.ypos[mesh.edge.cell[:, 0] - 1]
+    )
+    zhat = (
+        mesh.cell.zpos[mesh.edge.cell[:, 1] - 1] -
+        mesh.cell.zpos[mesh.edge.cell[:, 0] - 1]
+    )
+
+    lhat = np.sqrt(xhat ** 2 + yhat ** 2 + zhat ** 2)
+    
+    mesh.edge.xnrm = spdiags(
+        xhat / lhat, 0, mesh.edge.size, mesh.edge.size)
+    mesh.edge.ynrm = spdiags(
+        yhat / lhat, 0, mesh.edge.size, mesh.edge.size)
+    mesh.edge.znrm = spdiags(
+        zhat / lhat, 0, mesh.edge.size, mesh.edge.size)
 
 
     mesh.cell.xmid = \
@@ -112,6 +159,63 @@ def load_mesh(name, rsph=None):
     mesh.vert.mlon, mesh.vert.mlat = to_sphere(
         mesh, mesh.vert.xmid, mesh.vert.ymid, mesh.vert.zmid)
 
+
+    mesh.cell.area = cell_area (mesh)
+    mesh.edge.area = edge_area (mesh)
+    mesh.vert.area = dual_area (mesh)
+
+    mesh.vert.kite = np.zeros(
+        (mesh.vert.size, 3), dtype=np.float64)
+    mesh.vert.kite[:, 0]+= tria_area(
+        mesh.rsph,
+        np.vstack((mesh.vert.xlon, mesh.vert.ylat)).T,
+        np.vstack((mesh.cell.xlon[mesh.vert.cell[:, 0] - 1],
+                   mesh.cell.ylat[mesh.vert.cell[:, 0] - 1])).T,
+        np.vstack((mesh.edge.xlon[mesh.vert.edge[:, 1] - 1],
+                   mesh.edge.ylat[mesh.vert.edge[:, 1] - 1])).T
+    )
+    mesh.vert.kite[:, 0]+= tria_area(
+        mesh.rsph,
+        np.vstack((mesh.vert.xlon, mesh.vert.ylat)).T,
+        np.vstack((mesh.cell.xlon[mesh.vert.cell[:, 0] - 1],
+                   mesh.cell.ylat[mesh.vert.cell[:, 0] - 1])).T,
+        np.vstack((mesh.edge.xlon[mesh.vert.edge[:, 0] - 1],
+                   mesh.edge.ylat[mesh.vert.edge[:, 0] - 1])).T
+    )
+
+    mesh.vert.kite[:, 1]+= tria_area(
+        mesh.rsph,
+        np.vstack((mesh.vert.xlon, mesh.vert.ylat)).T,
+        np.vstack((mesh.cell.xlon[mesh.vert.cell[:, 1] - 1],
+                   mesh.cell.ylat[mesh.vert.cell[:, 1] - 1])).T,
+        np.vstack((mesh.edge.xlon[mesh.vert.edge[:, 2] - 1],
+                   mesh.edge.ylat[mesh.vert.edge[:, 2] - 1])).T
+    )
+    mesh.vert.kite[:, 1]+= tria_area(
+        mesh.rsph,
+        np.vstack((mesh.vert.xlon, mesh.vert.ylat)).T,
+        np.vstack((mesh.cell.xlon[mesh.vert.cell[:, 1] - 1],
+                   mesh.cell.ylat[mesh.vert.cell[:, 1] - 1])).T,
+        np.vstack((mesh.edge.xlon[mesh.vert.edge[:, 1] - 1],
+                   mesh.edge.ylat[mesh.vert.edge[:, 1] - 1])).T
+    )
+
+    mesh.vert.kite[:, 2]+= tria_area(
+        mesh.rsph,
+        np.vstack((mesh.vert.xlon, mesh.vert.ylat)).T,
+        np.vstack((mesh.cell.xlon[mesh.vert.cell[:, 2] - 1],
+                   mesh.cell.ylat[mesh.vert.cell[:, 2] - 1])).T,
+        np.vstack((mesh.edge.xlon[mesh.vert.edge[:, 0] - 1],
+                   mesh.edge.ylat[mesh.vert.edge[:, 0] - 1])).T
+    )
+    mesh.vert.kite[:, 2]+= tria_area(
+        mesh.rsph,
+        np.vstack((mesh.vert.xlon, mesh.vert.ylat)).T,
+        np.vstack((mesh.cell.xlon[mesh.vert.cell[:, 2] - 1],
+                   mesh.cell.ylat[mesh.vert.cell[:, 2] - 1])).T,
+        np.vstack((mesh.edge.xlon[mesh.vert.edge[:, 2] - 1],
+                   mesh.edge.ylat[mesh.vert.edge[:, 2] - 1])).T
+    )
 
     mesh.edge.stub = np.zeros(
         (mesh.edge.size, 2), dtype=np.float64)
@@ -155,10 +259,30 @@ def load_mesh(name, rsph=None):
                    mesh.vert.ylat[mesh.edge.vert[:, 1] - 1])).T
     )
 
-    mesh.edge.area = np.sum(mesh.edge.stub, axis=1) + \
-                     np.sum(mesh.edge.wing, axis=1) 
-    mesh.edge.area = mesh.edge.area * 0.5E+00
-   
+    mesh.edge.vlen = circ_dist(
+        mesh.rsph, 
+        np.vstack((mesh.vert.xlon[mesh.edge.vert[:, 0] - 1],
+                   mesh.vert.ylat[mesh.edge.vert[:, 0] - 1])).T,
+        np.vstack((mesh.vert.xlon[mesh.edge.vert[:, 1] - 1],
+                   mesh.vert.ylat[mesh.edge.vert[:, 1] - 1])).T
+    )
+        
+    mesh.edge.dlen = circ_dist(
+        mesh.rsph, 
+        np.vstack((mesh.cell.xlon[mesh.edge.cell[:, 0] - 1],
+                   mesh.cell.ylat[mesh.edge.cell[:, 0] - 1])).T,
+        np.vstack((mesh.cell.xlon[mesh.edge.cell[:, 1] - 1],
+                   mesh.cell.ylat[mesh.edge.cell[:, 1] - 1])).T
+    )
+    
+    # can set this as 2 * A_e / l_e instead of the TRSK-CV
+    # operators, as per Weller
+    mesh.edge.clen = 2.0 * mesh.edge.area / mesh.edge.vlen
+    #mesh.edge.clen = mesh.edge.dlen
+
+    # local characteristic edge length, for AUST upwinding
+    mesh.edge.slen = 0.5 * np.sqrt(2.0 * mesh.edge.area)
+
     return mesh
 
 
@@ -284,6 +408,36 @@ def circ_dist(rs, pa, pb):
     return dist
 
 
+def cell_area(mesh):
+    
+    pcel = np.vstack(
+        (mesh.cell.xlon, mesh.cell.ylat)).T
+    pvrt = np.vstack(
+        (mesh.vert.xlon, mesh.vert.ylat)).T
+
+    abar = np.zeros(mesh.cell.size, dtype=np.float64)
+    
+    rsph = mesh.rsph
+
+    for epos in range(np.max(mesh.cell.topo)):
+
+        mask = mesh.cell.topo > epos
+
+        cidx = np.argwhere(mask).ravel()
+
+        ifac = mesh.cell.edge[mask, epos] - 1
+
+        ivrt = mesh.edge.vert[ifac, 0] - 1
+        jvrt = mesh.edge.vert[ifac, 1] - 1
+
+        atri = tria_area(
+            rsph, pcel[cidx], pvrt[ivrt], pvrt[jvrt])
+
+        abar[cidx] += atri
+        
+    return abar
+
+
 def cell_quad(mesh, fcel, fvrt):
     
     pcel = np.vstack(
@@ -316,6 +470,40 @@ def cell_quad(mesh, fcel, fvrt):
         fbar[cidx] += atri * ftri / 3.0
 
     return fbar / abar
+
+
+def edge_area(mesh):
+
+    pcel = np.vstack(
+        (mesh.cell.xlon, mesh.cell.ylat)).T
+    pvrt = np.vstack(
+        (mesh.vert.xlon, mesh.vert.ylat)).T
+
+    abar = np.zeros(mesh.edge.size, dtype=np.float64)
+    
+    rsph = mesh.rsph
+
+    for epos in range(1):
+
+        eidx = np.arange(0, mesh.edge.size)
+
+        ivrt = mesh.edge.vert[eidx, 0] - 1
+        jvrt = mesh.edge.vert[eidx, 1] - 1
+
+        icel = mesh.edge.cell[eidx, 0] - 1
+        jcel = mesh.edge.cell[eidx, 1] - 1
+
+        atri = tria_area(
+            rsph, pvrt[ivrt], pcel[icel], pcel[jcel])
+
+        abar[eidx] += atri
+
+        atri = tria_area(
+            rsph, pvrt[jvrt], pcel[jcel], pcel[icel])
+
+        abar[eidx] += atri
+
+    return abar
 
 
 def edge_quad(mesh, fcel, fvrt):
@@ -357,6 +545,34 @@ def edge_quad(mesh, fcel, fvrt):
         fbar[eidx] += atri * ftri / 3.0
 
     return fbar / abar
+
+
+def dual_area(mesh):
+
+    pcel = np.vstack(
+        (mesh.cell.xlon, mesh.cell.ylat)).T
+    pvrt = np.vstack(
+        (mesh.vert.xlon, mesh.vert.ylat)).T
+
+    abar = np.zeros(mesh.vert.size, dtype=np.float64)
+
+    rsph = mesh.rsph
+
+    for epos in range(3):
+
+        vidx = np.arange(0, mesh.vert.size)
+
+        ifac = mesh.vert.edge[vidx, epos] - 1
+
+        icel = mesh.edge.cell[ifac, 0] - 1
+        jcel = mesh.edge.cell[ifac, 1] - 1
+
+        atri = tria_area(
+            rsph, pvrt[vidx], pcel[icel], pcel[jcel])
+
+        abar[vidx] += atri
+        
+    return abar
 
 
 def dual_quad(mesh, fcel, fvrt):
