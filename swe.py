@@ -45,9 +45,9 @@ def swe(cnfg):
 
     init_file(mesh, cnfg, flow, save)
 
-    u0_edge = flow.uu_edge[0, :, 0]
+    u0_edge = flow.uu_edge[-1, :, 0]
     uu_edge = u0_edge
-    h0_cell = flow.hh_cell[0, :, 0]
+    h0_cell = flow.hh_cell[-1, :, 0]
     hh_cell = h0_cell
 
     # make cell-based "land" masks
@@ -348,7 +348,7 @@ def invariant(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
         +0.0 * cnfg.time_step, 0.0 * cnfg.pv_upwind)
 
    #pv_sums = np.sum(
-   #    +0.5 * mesh.cell.area * hh_cell * pv_cell ** 2)
+   #    +0.5 * mesh.edge.area * hh_edge * pv_edge ** 2)
 
     pv_sums = np.sum(
         +0.5 * mesh.vert.area * hh_dual * pv_dual ** 2)
@@ -815,22 +815,20 @@ def upwinding(mesh, trsk, cnfg, sv_dual, sv_cell, sv_edge,
         gp_edge = trsk.edge_grad_perp * sv_dual * -1.
 
     #-- upwind APVM, scale w grid
-        uu_tiny = 1.0E-16
+        uu_tiny = 1.0E-16        
 
-        um_edge = uu_tiny + np.sqrt(
-            uu_edge ** 2 + vv_edge ** 2)
+        um_edge = \
+            np.sqrt(uu_edge ** 2 + vv_edge ** 2)
 
-        ee_scal = 0.50 * hrmn_mean(
-            mesh.edge.clen, mesh.edge.vlen)
+        um_edge+= uu_tiny
 
         sv_wind = uu_edge * gn_edge / um_edge + \
                   vv_edge * gp_edge / um_edge
 
-        sv_wind = sv_edge - ee_scal * sv_wind
+        ee_scal = mesh.edge.slen
 
-        sv_edge = (0.E+0 + up_bias) * sv_wind \
-                + (1.E+0 - up_bias) * sv_edge
-        
+        sv_edge-= up_bias * ee_scal * sv_wind
+
     ttoc = time.time()
     tcpu.upwinding = tcpu.upwinding + (ttoc - ttic)
 
@@ -846,10 +844,7 @@ def compute_H(mesh, trsk, cnfg, hh_cell, uu_edge):
         hh_dual = trsk.dual_kite_sums * hh_cell
         hh_dual/= mesh.vert.area
 
-        h1_edge = trsk.edge_wing_sums * hh_cell
-        h2_edge = trsk.edge_stub_sums * hh_dual
-        
-        hh_edge = 0.5 * h1_edge + 0.5 * h2_edge
+        hh_edge = trsk.edge_wing_sums * hh_cell
         hh_edge/= mesh.edge.area
 
     if (cnfg.operators == "TRSK-MD"):
@@ -877,7 +872,7 @@ def computePV(mesh, trsk, cnfg,
 
         hh_tiny = 1.0E-08
 
-    #-- RV+f on rhombi, PV on edge - more compact hh_edge?        
+    #-- RV+f on rhombi, PV on edge - more compact stencil?        
         rv_dual = trsk.dual_curl_sums * uu_edge
         rv_dual/= mesh.vert.area
         
@@ -898,10 +893,15 @@ def computePV(mesh, trsk, cnfg,
         rv_edge = trsk.quad_curl_sums * uu_edge
         rv_edge/= mesh.quad.area
 
+        hv_edge = trsk.edge_stub_sums * hh_dual
+        hv_edge/= mesh.edge.area
+
+        hm_edge = 0.5 * hh_edge + 0.5 * hv_edge
+
         av_edge = rv_edge + ff_edge
-       #pv_edge = av_edge / hh_edge
+       #pv_edge = av_edge / hm_edge
         pv_edge = \
-            limit_div(av_edge, hh_edge, hh_tiny)
+            limit_div(av_edge, hm_edge, hh_tiny)
 
         pv_edge = upwinding(
             mesh, trsk, cnfg, 
@@ -1121,9 +1121,9 @@ if (__name__ == "__main__"):
     
     parser.add_argument(
         "--ke-upwind", dest="ke_upwind", type=float,
-        default=1./15.,
+        default=1./20.,
         required=False,
-        help="Upwind KE.-edge bias {BIAS = 1./15.0}.")
+        help="Upwind KE.-edge bias {BIAS = 1./20.0}.")
 
     parser.add_argument(
         "--ke-scheme", dest="ke_scheme", type=str,

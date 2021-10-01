@@ -266,9 +266,7 @@ def load_mesh(name, rsph=None):
         np.vstack((mesh.vert.xlon[mesh.edge.vert[:, 1] - 1],
                    mesh.vert.ylat[mesh.edge.vert[:, 1] - 1])).T
     )
-    # can set this as 2 * A_e / l_e instead of the TRSK-CV
-    # operators, as per Weller
-    mesh.edge.clen = 2.0 * mesh.edge.area / mesh.edge.vlen    
+        
     mesh.edge.dlen = circ_dist(
         mesh.rsph, 
         np.vstack((mesh.cell.xlon[mesh.edge.cell[:, 0] - 1],
@@ -277,6 +275,14 @@ def load_mesh(name, rsph=None):
                    mesh.cell.ylat[mesh.edge.cell[:, 1] - 1])).T
     )
     
+    # can set this as 2 * A_e / l_e instead of the TRSK-CV
+    # operators, as per Weller
+    mesh.edge.clen = 2.0 * mesh.edge.area / mesh.edge.vlen
+    #mesh.edge.clen = mesh.edge.dlen
+
+    # local characteristic edge length, for AUST upwinding
+    mesh.edge.slen = 0.5 * np.sqrt(2.0 * mesh.edge.area)
+
     return mesh
 
 
