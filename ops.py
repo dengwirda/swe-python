@@ -24,17 +24,29 @@ def trsk_mats(mesh):
     EDGE-GRAD-NORM: edge gradient (normal)
     EDGE-GRAD-PERP: edge gradient (perpendicular)
 
-    DUAL-CURL-SUMS: curl integration (* area)
+    DUAL-FLUX-SUMS: div. integration (* area)
     DUAL-KITE-SUMS: cell-to-dual remapping
     DUAL-STUB-SUMS: edge-to-dual remapping
     DUAL-CELL-SUMS: cell-to-dual summation
     DUAL-EDGE-SUMS: edge-to-dual summation
+    DUAL-CURL-SUMS: curl integration (* area)    
     DUAL-DEL2-SUMS: dual del-squared (* area)
 
     QUAD-CURL-SUMS: curl integration (* area)
 
-    EDGE-FLUX-PERP: reconstruct u (perpendicular)
-    EDGE-LSQR-PERP: reconstruct u (perpendicular)
+    EDGE-FLUX-PERP: reconstruct v (perpendicular)
+    EDGE-LSQR-PERP: reconstruct v (perpendicular)
+    EDGE-LSQR-NORM: reconstruct u (perpendicular)
+
+    (from norm. components)
+    DUAL-LSQR-XNRM: reconstruct U (cartesian)
+    DUAL-LSQR-YNRM: reconstruct Y (cartesian)
+    DUAL-LSQR-ZNRM: reconstruct Z (cartesian)
+
+    (from perp. components)
+    DUAL-LSQR-XPRP: reconstruct U (cartesian)
+    DUAL-LSQR-YPRP: reconstruct Y (cartesian)
+    DUAL-LSQR-ZPRP: reconstruct Z (cartesian)
 
     (from norm. components)
     CELL-LSQR-XNRM: reconstruct U (cartesian)
@@ -46,15 +58,14 @@ def trsk_mats(mesh):
     EDGE-LSQR-YNRM: reconstruct Y (cartesian)
     EDGE-LSQR-ZNRM: reconstruct Z (cartesian)
 
-    (from norm. components)
-    DUAL-LSQR-XNRM: reconstruct U (cartesian)
-    DUAL-LSQR-YNRM: reconstruct Y (cartesian)
-    DUAL-LSQR-ZNRM: reconstruct Z (cartesian)
-
     (from perp. components)
-    DUAL-LSQR-XPRP: reconstruct U (cartesian)
-    DUAL-LSQR-YPRP: reconstruct Y (cartesian)
-    DUAL-LSQR-ZPRP: reconstruct Z (cartesian)
+    EDGE-LSQR-XPRP: reconstruct U (cartesian)
+    EDGE-LSQR-YPRP: reconstruct Y (cartesian)
+    EDGE-LSQR-ZPRP: reconstruct Z (cartesian)
+
+    (piecewise linear op's)
+    EDGE-DUAL-RECO: recon. F at edge from dual
+    EDGE-CELL-RECO: recon. F at edge from cell
 
     """
     # Authors: Darren Engwirda
@@ -70,7 +81,8 @@ def trsk_mats(mesh):
     trsk.cell_wing_sums = cell_wing_sums(mesh)
     trsk.cell_edge_sums = cell_edge_sums(mesh)
     trsk.cell_vert_sums = cell_vert_sums(mesh)
-    trsk.cell_curl_sums = cell_curl_sums(mesh)
+   #trsk.cell_curl_sums = cell_curl_sums(mesh)
+    trsk.cell_curl_sums = trsk.cell_flux_sums  # equiv.
 
     trsk.edge_stub_sums = edge_stub_sums(mesh)
     trsk.edge_wing_sums = edge_wing_sums(mesh)
@@ -82,13 +94,16 @@ def trsk_mats(mesh):
     trsk.cell_del2_sums = trsk.cell_flux_sums \
                         * trsk.edge_grad_norm
 
-    trsk.dual_curl_sums = dual_curl_sums(mesh)
+    trsk.dual_flux_sums = dual_flux_sums(mesh)
     trsk.dual_kite_sums = dual_kite_sums(mesh)
     trsk.dual_stub_sums = dual_stub_sums(mesh)
     trsk.dual_cell_sums = dual_cell_sums(mesh)
     trsk.dual_edge_sums = dual_edge_sums(mesh)
+   #trsk.dual_curl_sums = dual_curl_sums(mesh)
+    trsk.dual_curl_sums = trsk.dual_flux_sums  # equiv.
 
-    trsk.dual_del2_sums = dual_del2_sums(mesh)
+    trsk.dual_del2_sums = trsk.dual_flux_sums \
+                        * trsk.edge_grad_perp
 
     # take curl on rhombi, a'la Gassmann
     trsk.quad_curl_sums = trsk.edge_vert_sums \
@@ -96,21 +111,25 @@ def trsk_mats(mesh):
     trsk.quad_curl_sums.setdiag(0.0)
     trsk.quad_curl_sums.eliminate_zeros()
 
-    trsk.cell_lsqr_xnrm, \
-    trsk.cell_lsqr_ynrm, \
-    trsk.cell_lsqr_znrm = cell_lsqr_fxyz(mesh)
-
-    trsk.edge_lsqr_xnrm, \
-    trsk.edge_lsqr_ynrm, \
-    trsk.edge_lsqr_znrm = edge_lsqr_fxyz(mesh)
-    
+    # least-squares vector reconstruction operators
     trsk.dual_lsqr_xnrm, \
     trsk.dual_lsqr_ynrm, \
     trsk.dual_lsqr_znrm, \
     trsk.dual_lsqr_xprp, \
     trsk.dual_lsqr_yprp, \
     trsk.dual_lsqr_zprp = dual_lsqr_fxyz(mesh)
- 
+
+    trsk.cell_lsqr_xnrm, \
+    trsk.cell_lsqr_ynrm, \
+    trsk.cell_lsqr_znrm = cell_lsqr_fxyz(mesh)
+
+    trsk.edge_lsqr_xnrm, \
+    trsk.edge_lsqr_ynrm, \
+    trsk.edge_lsqr_znrm, \
+    trsk.edge_lsqr_xprp, \
+    trsk.edge_lsqr_yprp, \
+    trsk.edge_lsqr_zprp = edge_lsqr_fxyz(mesh)
+    
     # ensure flux reconstruction operator is exactly
     # skew-symmetric. Per Ringler et al, 2010, W_prp
     # is required to be anti-symmetric to ensure
@@ -169,12 +188,23 @@ def trsk_mats(mesh):
     mesh.quad.area = \
         trsk.edge_vert_sums * mesh.vert.area
 
-    # build LSQR-PERP from edge-wise reconstructions
+    # build LSQR-<OP> from edge-wise reconstructions
     trsk.edge_lsqr_perp = +1.0 * (
         mesh.edge.xprp * trsk.edge_lsqr_xnrm +
         mesh.edge.yprp * trsk.edge_lsqr_ynrm +
         mesh.edge.zprp * trsk.edge_lsqr_znrm 
     )
+
+    trsk.edge_lsqr_norm = +1.0 * (
+        mesh.edge.xnrm * trsk.edge_lsqr_xprp +
+        mesh.edge.ynrm * trsk.edge_lsqr_yprp +
+        mesh.edge.znrm * trsk.edge_lsqr_zprp 
+    )
+
+    # operators for piecewise linear reconstructions
+    # fe = fi + (xe - xi) * grad(f)
+    trsk.edge_dual_reco = edge_dual_reco(mesh, trsk)
+    trsk.edge_cell_reco = edge_cell_reco(mesh, trsk)
 
     return trsk
 
@@ -440,7 +470,7 @@ def edge_grad_norm(mesh):
 
 def edge_grad_perp(mesh):
 
-#-- EDGE-GRAD-PERP: returns (V(j)-V(i))/eij as sparse matrix
+#-- EDGE-GRAD-PERP: returns (V(j)-V(i))/vij as sparse matrix
 #-- operator OP. Use GRAD(V) = OP * V where V is a vector of
 #-- node-centred scalars for all nodes in the mesh.
 
@@ -457,12 +487,6 @@ def edge_grad_perp(mesh):
         (-1.E+0 / vlen, +1.E+0 / vlen))
     
     return csr_matrix((xvec, (ivec, jvec)))
-
-
-def edge_vals_perp(mesh):
-
-
-    return wmul
 
 
 def edge_flux_perp(mesh):
@@ -514,6 +538,36 @@ def dual_edge_sign(mesh):
         sign[flip, edge] = -1
 
     return sign
+
+
+def dual_flux_sums(mesh):
+
+    xvec = np.array([], dtype=np.float64)
+    ivec = np.array([], dtype=np.int32)
+    jvec = np.array([], dtype=np.int32)
+
+    for edge in range(3):
+
+        vidx = np.arange(0, mesh.vert.size)
+
+        eidx = mesh.vert.edge[:, edge] - 1
+        cidx = mesh.vert.cell[:, edge] - 1
+
+        clen = mesh.edge.clen[eidx]
+
+        c1st = mesh.edge.cell[eidx, 0] - 1
+
+        okay = cidx != c1st
+        flip = cidx == c1st
+
+        ivec = np.hstack((
+            ivec, +vidx[flip], vidx[okay]))
+        jvec = np.hstack((
+            jvec, +eidx[flip], eidx[okay]))
+        xvec = np.hstack((
+            xvec, -clen[flip], clen[okay]))
+        
+    return csr_matrix((xvec, (ivec, jvec)))
 
 
 def dual_curl_sums(mesh):
@@ -615,41 +669,6 @@ def dual_edge_sums(mesh):
     return csr_matrix((xvec, (ivec, jvec)))
 
 
-def dual_del2_sums(mesh):
-
-    xvec = np.array([], dtype=np.float64)
-    ivec = np.array([], dtype=np.int32)
-    jvec = np.array([], dtype=np.int32)
-
-    for edge in range(3):
-
-        vidx = np.arange(0, mesh.vert.size)
-
-        eidx = mesh.vert.edge[:, edge] - 1
-
-        aidx = mesh.edge.vert[eidx, 0] - 1
-        bidx = mesh.edge.vert[eidx, 1] - 1
-
-        same = aidx != vidx
-        next = aidx == vidx
-
-        vals = mesh.edge.clen[eidx] / \
-               mesh.edge.vlen[eidx]
-
-        ivec = np.hstack((ivec, +vidx))
-        jvec = np.hstack((jvec, +vidx))
-        xvec = np.hstack((xvec, -vals))
-
-        ivec = np.hstack((
-            ivec, vidx[same], vidx[next]))
-        jvec = np.hstack((
-            jvec, aidx[same], bidx[next]))
-        xvec = np.hstack((
-            xvec, vals[same], vals[next]))
-
-    return csr_matrix((xvec, (ivec, jvec)))
-
-
 def dual_lsqr_fxyz(mesh):
 
     RSPH = mesh.rsph
@@ -682,46 +701,43 @@ def dual_lsqr_fxyz(mesh):
     pdir = pdir / plen
 
     dnrm = np.vstack((
-        mesh.vert.xpos, 
-        mesh.vert.ypos, mesh.vert.zpos)).T
+        mesh.vert.xmid, 
+        mesh.vert.ymid, mesh.vert.zmid)).T
     
     dnrm = dnrm / RSPH
     
-    Tmat = np.zeros(
+    Amat = np.zeros(
         (4, 3, mesh.vert.size), dtype=np.float64)
-    Tmat[0, :, :] = \
+    Amat[0, :, :] = \
         ndir[mesh.vert.edge[:, 0] - 1].T
-    Tmat[1, :, :] = \
+    Amat[1, :, :] = \
         ndir[mesh.vert.edge[:, 1] - 1].T
-    Tmat[2, :, :] = \
+    Amat[2, :, :] = \
         ndir[mesh.vert.edge[:, 2] - 1].T
-    Tmat[3, :, :] = np.transpose(dnrm)
+    Amat[3, :, :] = np.transpose(dnrm)
 
-    Umat = np.zeros(
+    Bmat = np.zeros(
         (4, 3, mesh.vert.size), dtype=np.float64)
-    Umat[0, :, :] = \
+    Bmat[0, :, :] = \
         pdir[mesh.vert.edge[:, 0] - 1].T
-    Umat[1, :, :] = \
+    Bmat[1, :, :] = \
         pdir[mesh.vert.edge[:, 1] - 1].T
-    Umat[2, :, :] = \
+    Bmat[2, :, :] = \
         pdir[mesh.vert.edge[:, 2] - 1].T
-    Umat[3, :, :] = np.transpose(dnrm)
+    Bmat[3, :, :] = np.transpose(dnrm)
 
-    matT = np.transpose(Tmat, axes=(1, 0, 2))
-    matU = np.transpose(Umat, axes=(1, 0, 2))
+    matA = np.transpose(Amat, axes=(1, 0, 2))
+    matB = np.transpose(Bmat, axes=(1, 0, 2))
 
     Rmat = np.einsum(
-        "ik..., kj... -> ij...", matT, Tmat)
+        "ik..., kj... -> ij...", matA, Amat)
 
     Rinv, Rdet = inv_3x3(Rmat)
 
     Smat = np.einsum(
-        "ik..., kj... -> ij...", matU, Umat)
+        "ik..., kj... -> ij...", matB, Bmat)
 
     Sinv, Sdet = inv_3x3(Smat)
-
-    ivec = np.array([], dtype=np.int32)
-    jvec = np.array([], dtype=np.int32)
 
     xnrm = np.array([], dtype=np.float64)
     ynrm = np.array([], dtype=np.float64)
@@ -731,6 +747,9 @@ def dual_lsqr_fxyz(mesh):
     yprp = np.array([], dtype=np.float64)
     zprp = np.array([], dtype=np.float64)
     
+    ivec = np.array([], dtype=np.int32)
+    jvec = np.array([], dtype=np.int32)
+
     for edge in range(3):
 
         vidx = np.arange(0, mesh.vert.size)
@@ -741,21 +760,21 @@ def dual_lsqr_fxyz(mesh):
         jvec = np.hstack((jvec, eidx))
 
         xmul = (
-            Rinv[0, 0, :] * matT[0, edge, :] +
-            Rinv[0, 1, :] * matT[1, edge, :] +
-            Rinv[0, 2, :] * matT[2, edge, :]
+            Rinv[0, 0, :] * matA[0, edge, :] +
+            Rinv[0, 1, :] * matA[1, edge, :] +
+            Rinv[0, 2, :] * matA[2, edge, :]
         ) / Rdet
 
         ymul = (
-            Rinv[1, 0, :] * matT[0, edge, :] +
-            Rinv[1, 1, :] * matT[1, edge, :] +
-            Rinv[1, 2, :] * matT[2, edge, :]
+            Rinv[1, 0, :] * matA[0, edge, :] +
+            Rinv[1, 1, :] * matA[1, edge, :] +
+            Rinv[1, 2, :] * matA[2, edge, :]
         ) / Rdet
 
         zmul = (
-            Rinv[2, 0, :] * matT[0, edge, :] +
-            Rinv[2, 1, :] * matT[1, edge, :] +
-            Rinv[2, 2, :] * matT[2, edge, :]
+            Rinv[2, 0, :] * matA[0, edge, :] +
+            Rinv[2, 1, :] * matA[1, edge, :] +
+            Rinv[2, 2, :] * matA[2, edge, :]
         ) / Rdet
 
         xnrm = np.hstack((xnrm, xmul))
@@ -763,21 +782,21 @@ def dual_lsqr_fxyz(mesh):
         znrm = np.hstack((znrm, zmul))
 
         xmul = (
-            Sinv[0, 0, :] * matU[0, edge, :] +
-            Sinv[0, 1, :] * matU[1, edge, :] +
-            Sinv[0, 2, :] * matU[2, edge, :]
+            Sinv[0, 0, :] * matB[0, edge, :] +
+            Sinv[0, 1, :] * matB[1, edge, :] +
+            Sinv[0, 2, :] * matB[2, edge, :]
         ) / Sdet
 
         ymul = (
-            Sinv[1, 0, :] * matU[0, edge, :] +
-            Sinv[1, 1, :] * matU[1, edge, :] +
-            Sinv[1, 2, :] * matU[2, edge, :]
+            Sinv[1, 0, :] * matB[0, edge, :] +
+            Sinv[1, 1, :] * matB[1, edge, :] +
+            Sinv[1, 2, :] * matB[2, edge, :]
         ) / Sdet
 
         zmul = (
-            Sinv[2, 0, :] * matU[0, edge, :] +
-            Sinv[2, 1, :] * matU[1, edge, :] +
-            Sinv[2, 2, :] * matU[2, edge, :]
+            Sinv[2, 0, :] * matB[0, edge, :] +
+            Sinv[2, 1, :] * matB[1, edge, :] +
+            Sinv[2, 2, :] * matB[2, edge, :]
         ) / Sdet
 
         xprp = np.hstack((xprp, xmul))
@@ -795,8 +814,8 @@ def dual_lsqr_fxyz(mesh):
 def cell_lsqr_fxyz(mesh):
 
     cnrm = np.vstack((
-        mesh.cell.xpos,
-        mesh.cell.ypos, mesh.cell.zpos)).T
+        mesh.cell.xmid,
+        mesh.cell.ymid, mesh.cell.zmid)).T
     
     cnrm = cnrm / mesh.rsph
 
@@ -894,143 +913,9 @@ def cell_lsqr_fxyz(mesh):
            csr_matrix((yvec, (ivec, jvec))), \
            csr_matrix((zvec, (ivec, jvec)))
 
-"""
-def edge_lsqr_fxyz(mesh):
-#-- edge reconstruction via "small" tria-based stencil
-
-    enrm = np.vstack((
-        mesh.edge.xpos,
-        mesh.edge.ypos, mesh.edge.zpos)).T
-    
-    enrm = enrm / mesh.rsph
-
-    edir = np.vstack((
-        mesh.cell.xpos[mesh.edge.cell[:, 1] - 1] -
-        mesh.cell.xpos[mesh.edge.cell[:, 0] - 1],
-        mesh.cell.ypos[mesh.edge.cell[:, 1] - 1] -
-        mesh.cell.ypos[mesh.edge.cell[:, 0] - 1],
-        mesh.cell.zpos[mesh.edge.cell[:, 1] - 1] -
-        mesh.cell.zpos[mesh.edge.cell[:, 0] - 1]))
-    edir = edir.T
-
-    elen = np.sqrt(np.sum(
-        edir ** 2, axis=1, keepdims=True))
-
-    edir = edir / elen
-
-    topo = np.zeros(
-        (mesh.edge.size, 4), dtype=np.int32)
-
-    next = np.zeros(
-        (mesh.edge.size, 1), dtype=np.int32)
-
-    Tmat = np.zeros(
-        (5, 3, mesh.edge.size), dtype=np.float64)
-
-    Wmat = np.zeros(
-        (5, 5, mesh.edge.size), dtype=np.float64)
-
-    for edge in range(3):
-
-        ivrt = mesh.edge.vert[:, 0] - 1
-        jvrt = mesh.edge.vert[:, 1] - 1
-
-    #-- add non-self edge from ivrt
-        eidx = mesh.vert.edge[ivrt, edge] - 1
-
-        enum = np.arange(0, mesh.edge.size)
-
-        keep = eidx != enum
-
-        topo[keep, next[keep, 0]] = eidx[keep]
-        next[keep, 0] += 1
-
-    #-- add non-self edge from jvrt
-        eidx = mesh.vert.edge[jvrt, edge] - 1
-
-        enum = np.arange(0, mesh.edge.size)
-
-        keep = eidx != enum
-
-        topo[keep, next[keep, 0]] = eidx[keep]
-        next[keep, 0] += 1
-
-    for edge in range(5):
-
-        Wmat[edge, edge, :] = +1.0  # unweighted
-
-    for edge in range(4):
-
-        mask = np.full(
-            mesh.edge.size, True, dtype=bool)
-
-        eidx = topo[mask, edge] - 0
-
-        area = mesh.edge.area[eidx].T
-
-        Wmat[edge, edge, mask] = +1.0  # unweighted
-
-        Tmat[edge,    :, mask] = edir[eidx]
-    
-    Tmat[-1, :, :] = np.transpose(enrm)
-    
-
-    matT = np.transpose(Tmat, axes=(1, 0, 2))
-
-    matW = np.einsum(
-        "ik..., kj... -> ij...", matT, Wmat)
-
-    Rmat = np.einsum(
-        "ik..., kj... -> ij...", matW, Tmat)
-
-    Rinv, Rdet = inv_3x3(Rmat)
-
-    xvec = np.array([], dtype=np.float64)
-    yvec = np.array([], dtype=np.float64)
-    zvec = np.array([], dtype=np.float64)
-    ivec = np.array([], dtype=np.int32)
-    jvec = np.array([], dtype=np.int32)
-
-    for edge in range(4):
-
-        mask = np.full(
-            mesh.edge.size, True, dtype=bool)
-
-        enum = np.argwhere(mask).ravel()
-
-        eidx = topo[mask, edge] - 0
-
-        M = mask
-        xmul = (
-            Rinv[0, 0, M] * matW[0, edge, M] +
-            Rinv[0, 1, M] * matW[1, edge, M] +
-            Rinv[0, 2, M] * matW[2, edge, M]
-        ) / Rdet[M]
-
-        ymul = (
-            Rinv[1, 0, M] * matW[0, edge, M] +
-            Rinv[1, 1, M] * matW[1, edge, M] +
-            Rinv[1, 2, M] * matW[2, edge, M]
-        ) / Rdet[M]
-
-        zmul = (
-            Rinv[2, 0, M] * matW[0, edge, M] +
-            Rinv[2, 1, M] * matW[1, edge, M] +
-            Rinv[2, 2, M] * matW[2, edge, M]
-        ) / Rdet[M]
-
-        ivec = np.hstack((ivec, enum))
-        jvec = np.hstack((jvec, eidx))
-        xvec = np.hstack((xvec, xmul))
-        yvec = np.hstack((yvec, ymul))
-        zvec = np.hstack((zvec, zmul))
-
-    return csr_matrix((xvec, (ivec, jvec))), \
-           csr_matrix((yvec, (ivec, jvec))), \
-           csr_matrix((zvec, (ivec, jvec)))
-"""
 
 def edge_lsqr_fxyz(mesh):
+
 #-- edge reconstruction via "large" cell-based stencil
 
     enrm = np.vstack((
@@ -1039,21 +924,38 @@ def edge_lsqr_fxyz(mesh):
     
     enrm = enrm / mesh.rsph
 
-    edir = np.vstack((
+    ndir = np.vstack((
         mesh.cell.xpos[mesh.edge.cell[:, 1] - 1] -
         mesh.cell.xpos[mesh.edge.cell[:, 0] - 1],
         mesh.cell.ypos[mesh.edge.cell[:, 1] - 1] -
         mesh.cell.ypos[mesh.edge.cell[:, 0] - 1],
         mesh.cell.zpos[mesh.edge.cell[:, 1] - 1] -
         mesh.cell.zpos[mesh.edge.cell[:, 0] - 1]))
-    edir = edir.T
+    ndir = ndir.T
 
-    elen = np.sqrt(np.sum(
-        edir ** 2, axis=1, keepdims=True))
+    nlen = np.sqrt(np.sum(
+        ndir ** 2, axis=1, keepdims=True))
 
-    edir = edir / elen
+    pdir = np.vstack((
+        mesh.vert.xpos[mesh.edge.vert[:, 1] - 1] -
+        mesh.vert.xpos[mesh.edge.vert[:, 0] - 1],
+        mesh.vert.ypos[mesh.edge.vert[:, 1] - 1] -
+        mesh.vert.ypos[mesh.edge.vert[:, 0] - 1],
+        mesh.vert.zpos[mesh.edge.vert[:, 1] - 1] -
+        mesh.vert.zpos[mesh.edge.vert[:, 0] - 1]))
+    pdir = pdir.T
 
-    Tmat = np.zeros(
+    plen = np.sqrt(np.sum(
+        pdir ** 2, axis=1, keepdims=True))
+
+    ndir = ndir / nlen
+    pdir = pdir / plen
+
+    Amat = np.zeros(
+        (np.max(mesh.edge.topo) + 1, 3,
+         mesh.edge.size), dtype=np.float64)
+
+    Bmat = np.zeros(
         (np.max(mesh.edge.topo) + 1, 3,
          mesh.edge.size), dtype=np.float64)
 
@@ -1076,24 +978,36 @@ def edge_lsqr_fxyz(mesh):
 
         Wmat[edge, edge, mask] = area
 
-        Tmat[edge,    :, mask] = edir[eidx]
+        Amat[edge,    :, mask] = ndir[eidx]
+        Bmat[edge,    :, mask] = pdir[eidx]
     
-    Tmat[-1, :, :] = np.transpose(enrm)
+    Amat[-1, :, :] = np.transpose(enrm)
+    Bmat[-1, :, :] = np.transpose(enrm)
     
+    matA = np.transpose(Amat, axes=(1, 0, 2))
+    matB = np.transpose(Bmat, axes=(1, 0, 2))
 
-    matT = np.transpose(Tmat, axes=(1, 0, 2))
-
-    matW = np.einsum(
-        "ik..., kj... -> ij...", matT, Wmat)
-
+    matI = np.einsum(
+        "ik..., kj... -> ij...", matA, Wmat)
     Rmat = np.einsum(
-        "ik..., kj... -> ij...", matW, Tmat)
+        "ik..., kj... -> ij...", matI, Amat)
+
+    matJ = np.einsum(
+        "ik..., kj... -> ij...", matB, Wmat)
+    Smat = np.einsum(
+        "ik..., kj... -> ij...", matJ, Bmat)
 
     Rinv, Rdet = inv_3x3(Rmat)
+    Sinv, Sdet = inv_3x3(Smat)
 
-    xvec = np.array([], dtype=np.float64)
-    yvec = np.array([], dtype=np.float64)
-    zvec = np.array([], dtype=np.float64)
+    xnrm = np.array([], dtype=np.float64)
+    ynrm = np.array([], dtype=np.float64)
+    znrm = np.array([], dtype=np.float64)
+
+    xprp = np.array([], dtype=np.float64)
+    yprp = np.array([], dtype=np.float64)
+    zprp = np.array([], dtype=np.float64)
+    
     ivec = np.array([], dtype=np.int32)
     jvec = np.array([], dtype=np.int32)
 
@@ -1105,31 +1019,138 @@ def edge_lsqr_fxyz(mesh):
 
         eidx = mesh.edge.edge[mask, edge] - 1
 
+        ivec = np.hstack((ivec, enum))
+        jvec = np.hstack((jvec, eidx))
+
         M = mask
         xmul = (
-            Rinv[0, 0, M] * matW[0, edge, M] +
-            Rinv[0, 1, M] * matW[1, edge, M] +
-            Rinv[0, 2, M] * matW[2, edge, M]
+            Rinv[0, 0, M] * matI[0, edge, M] +
+            Rinv[0, 1, M] * matI[1, edge, M] +
+            Rinv[0, 2, M] * matI[2, edge, M]
         ) / Rdet[M]
 
         ymul = (
-            Rinv[1, 0, M] * matW[0, edge, M] +
-            Rinv[1, 1, M] * matW[1, edge, M] +
-            Rinv[1, 2, M] * matW[2, edge, M]
+            Rinv[1, 0, M] * matI[0, edge, M] +
+            Rinv[1, 1, M] * matI[1, edge, M] +
+            Rinv[1, 2, M] * matI[2, edge, M]
         ) / Rdet[M]
 
         zmul = (
-            Rinv[2, 0, M] * matW[0, edge, M] +
-            Rinv[2, 1, M] * matW[1, edge, M] +
-            Rinv[2, 2, M] * matW[2, edge, M]
+            Rinv[2, 0, M] * matI[0, edge, M] +
+            Rinv[2, 1, M] * matI[1, edge, M] +
+            Rinv[2, 2, M] * matI[2, edge, M]
         ) / Rdet[M]
 
-        ivec = np.hstack((ivec, enum))
-        jvec = np.hstack((jvec, eidx))
-        xvec = np.hstack((xvec, xmul))
-        yvec = np.hstack((yvec, ymul))
-        zvec = np.hstack((zvec, zmul))
+        xnrm = np.hstack((xnrm, xmul))
+        ynrm = np.hstack((ynrm, ymul))
+        znrm = np.hstack((znrm, zmul))
 
-    return csr_matrix((xvec, (ivec, jvec))), \
-           csr_matrix((yvec, (ivec, jvec))), \
-           csr_matrix((zvec, (ivec, jvec)))
+        M = mask
+        xmul = (
+            Sinv[0, 0, M] * matJ[0, edge, M] +
+            Sinv[0, 1, M] * matJ[1, edge, M] +
+            Sinv[0, 2, M] * matJ[2, edge, M]
+        ) / Sdet[M]
+
+        ymul = (
+            Sinv[1, 0, M] * matJ[0, edge, M] +
+            Sinv[1, 1, M] * matJ[1, edge, M] +
+            Sinv[1, 2, M] * matJ[2, edge, M]
+        ) / Sdet[M]
+
+        zmul = (
+            Sinv[2, 0, M] * matJ[0, edge, M] +
+            Sinv[2, 1, M] * matJ[1, edge, M] +
+            Sinv[2, 2, M] * matJ[2, edge, M]
+        ) / Sdet[M]
+
+        xprp = np.hstack((xprp, xmul))
+        yprp = np.hstack((yprp, ymul))
+        zprp = np.hstack((zprp, zmul))
+
+    return csr_matrix((xnrm, (ivec, jvec))), \
+           csr_matrix((ynrm, (ivec, jvec))), \
+           csr_matrix((znrm, (ivec, jvec))), \
+           csr_matrix((xprp, (ivec, jvec))), \
+           csr_matrix((yprp, (ivec, jvec))), \
+           csr_matrix((zprp, (ivec, jvec)))
+
+
+def edge_dual_reco(mesh, trsk):
+
+#-- EDGE-DUAL-RECO: returns .5 * (xe - xv) * grad(F) part of
+#-- edge reconstruction operator,
+#-- with gradients estimated using "2-ring" stencil on duals.
+
+    vrt1 = mesh.edge.vert[:, 0] - 1
+    xev1 = mesh.edge.xpos - mesh.vert.xmid[vrt1]
+    yev1 = mesh.edge.ypos - mesh.vert.ymid[vrt1]
+    zev1 = mesh.edge.zpos - mesh.vert.zmid[vrt1]
+
+    vrt2 = mesh.edge.vert[:, 1] - 1
+    xev2 = mesh.edge.xpos - mesh.vert.xmid[vrt2]
+    yev2 = mesh.edge.ypos - mesh.vert.ymid[vrt2]
+    zev2 = mesh.edge.zpos - mesh.vert.zmid[vrt2]
+
+    eidx = np.arange(0, mesh.edge.size)
+
+    ivec = np.hstack((eidx, eidx))
+    jvec = np.hstack((vrt1, vrt2))
+
+    xmat = csr_matrix((
+        np.hstack((xev1, xev2)), (ivec, jvec)))
+    
+    ymat = csr_matrix((
+        np.hstack((yev1, yev2)), (ivec, jvec)))
+    
+    zmat = csr_matrix((
+        np.hstack((zev1, zev2)), (ivec, jvec)))
+
+    return (
+        +0.500 * xmat * (trsk.dual_lsqr_xprp * 
+                         trsk.edge_grad_perp) +
+        +0.500 * ymat * (trsk.dual_lsqr_yprp * 
+                         trsk.edge_grad_perp) +
+        +0.500 * zmat * (trsk.dual_lsqr_zprp * 
+                         trsk.edge_grad_perp)
+    )
+
+
+def edge_cell_reco(mesh, trsk):
+
+#-- EDGE-CELL-RECO: returns .5 * (xe - xc) * grad(F) part of
+#-- edge reconstruction operator,
+#-- with gradients estimated using "2-ring" stencil on cells.
+
+    cel1 = mesh.edge.cell[:, 0] - 1
+    xec1 = mesh.edge.xpos - mesh.cell.xmid[cel1]
+    yec1 = mesh.edge.ypos - mesh.cell.ymid[cel1]
+    zec1 = mesh.edge.zpos - mesh.cell.zmid[cel1]
+
+    cel2 = mesh.edge.cell[:, 1] - 1
+    xec2 = mesh.edge.xpos - mesh.cell.xmid[cel2]
+    yec2 = mesh.edge.ypos - mesh.cell.ymid[cel2]
+    zec2 = mesh.edge.zpos - mesh.cell.zmid[cel2]
+
+    eidx = np.arange(0, mesh.edge.size)
+
+    ivec = np.hstack((eidx, eidx))
+    jvec = np.hstack((cel1, cel2))
+
+    xmat = csr_matrix((
+        np.hstack((xec1, xec2)), (ivec, jvec)))
+    
+    ymat = csr_matrix((
+        np.hstack((yec1, yec2)), (ivec, jvec)))
+    
+    zmat = csr_matrix((
+        np.hstack((zec1, zec2)), (ivec, jvec)))
+
+    return (
+        +0.500 * xmat * (trsk.cell_lsqr_xnrm * 
+                         trsk.edge_grad_norm) +
+        +0.500 * ymat * (trsk.cell_lsqr_ynrm * 
+                         trsk.edge_grad_norm) +
+        +0.500 * zmat * (trsk.cell_lsqr_znrm * 
+                         trsk.edge_grad_norm)
+    )
