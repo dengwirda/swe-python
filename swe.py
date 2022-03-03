@@ -39,6 +39,8 @@ def swe(cnfg):
     cnfg.ke_scheme = cnfg.ke_scheme.upper()
     cnfg.pv_scheme = cnfg.pv_scheme.upper()
 
+    cnfg.du_damp_4 = np.sqrt(cnfg.du_damp_4)
+
     name = cnfg.mpas_file
     path, file = os.path.split(name)
     save = os.path.join(path, "out_" + file)
@@ -1148,7 +1150,7 @@ def upwinding(mesh, trsk, cnfg,
         ee_scal = mesh.edge.slen
 
         sv_bias = up_bias \
-            + np.minimum(+1./3. - up_bias, sv_bias)
+            + np.minimum(+1./4. - up_bias, sv_bias)
 
         sv_edge-= sv_bias * ee_scal * sv_wind
 
@@ -1375,18 +1377,34 @@ def advect_PV(mesh, trsk, cnfg, uh_edge, pv_edge):
 
 def computeDU(mesh, trsk, cnfg, uu_edge):
 
+#-- Divergence(-only) dissipation
+
     ttic = time.time()
 
+#-- div(u.n)
     du_cell = trsk.cell_flux_sums * uu_edge
     du_cell/= mesh.cell.area
-    du_cell*= cnfg.du_damp_2
+    
+    d2_cell = du_cell * cnfg.du_damp_2
+    d4_cell = du_cell * cnfg.du_damp_4  # NB. sqrt(vk)
 
-    du_edge = trsk.edge_grad_norm * du_cell
+#-- D^2 = grad(vk * div(u.n))
+    d2_edge = trsk.edge_grad_norm * d2_cell
+    d4_edge = trsk.edge_grad_norm * d4_cell
+
+#-- div(D^2)
+    du_cell = trsk.cell_flux_sums * d4_edge
+    du_cell/= mesh.cell.area
+    
+    d4_cell = du_cell * cnfg.du_damp_4  # NB. sqrt(vk)
+
+#-- D^4 = grad(vk * div(D^2))
+    d4_edge = trsk.edge_grad_norm * d4_cell
     
     ttoc = time.time()
     tcpu.computeDU = tcpu.computeDU + (ttoc - ttic)
 
-    return du_edge * +1.00
+    return d2_edge - d4_edge
     
 
 if (__name__ == "__main__"):
@@ -1444,9 +1462,15 @@ if (__name__ == "__main__"):
 
     parser.add_argument(
         "--du-damp-2", dest="du_damp_2", type=float,
-        default=1.E+00,
+        default=0.E+00,
         required=False,
-        help="DIV.(U) DEL^2 coeff. {DAMP = +1.E+04}.")
+        help="DIV.(U) DEL^2 coeff. {DAMP = +0.E+00}.")
+
+    parser.add_argument(
+        "--du-damp-4", dest="du_damp_4", type=float,
+        default=0.E+00,
+        required=False,
+        help="DIV.(U) DEL^4 coeff. {DAMP = +0.E+00}.")
 
     parser.add_argument(
         "--operators", dest="operators", type=str,
