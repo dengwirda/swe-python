@@ -46,20 +46,20 @@ def init(name, save, rsph=1.E+0, pert=True):
 
 #------------------------------------ load an MPAS mesh file
 
-    print("Load the mesh file")
+    print("Loading the mesh file...")
 
     mesh = load_mesh(name, rsph)
     
 #------------------------------------ build TRSK matrix op's
 
-    print("Forming coefficients")
+    print("Forming coefficients...")
 
     trsk = trsk_mats(mesh)
 
 #------------------------------------ build a streamfunction
 
-    print("Build streamfunction")
-
+    print("Computing streamfunction...")
+    
 #-- J. Galewsky, R.K. Scott & L.M. Polvani (2004) An initial
 #-- value problem for testing numerical models of the global
 #-- shallow-water equations, Tellus A: Dynamic Meteorology &
@@ -118,7 +118,7 @@ def init(name, save, rsph=1.E+0, pert=True):
 #-- Computational Modes and Grid Imprinting on Five Quasi-
 #-- Uniform Spherical C-Grids, M.Wea.Rev. 140(8): 2734-2755.
 
-    print("Calc. velocity field")
+    print("Computing velocity field...")
 
     unrm = trsk.edge_grad_perp * vpsi * -1.00
 
@@ -133,7 +133,7 @@ def init(name, save, rsph=1.E+0, pert=True):
 #-- solve -g * del^2 h = div f * u_perp for layer thickness,
 #-- leads to a h which is in discrete balance
 
-    print("Find layer thickness")
+    print("Coputing layer thickness...")
 
     frot = 2.0 * erot * np.sin(mesh.edge.ylat)
 

@@ -1,4 +1,5 @@
 
+import warnings
 import numpy as np
 from scipy.sparse import csr_matrix, spdiags
 from mat import inv_3x3
@@ -108,8 +109,11 @@ def trsk_mats(mesh):
     # take curl on rhombi, a'la Gassmann
     trsk.quad_curl_sums = trsk.edge_vert_sums \
                         * trsk.dual_curl_sums
-    trsk.quad_curl_sums.setdiag(0.0)
-    trsk.quad_curl_sums.eliminate_zeros()
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        trsk.quad_curl_sums.setdiag(0.)
+        trsk.quad_curl_sums.eliminate_zeros()
 
     # least-squares vector reconstruction operators
     trsk.dual_lsqr_xnrm, \
