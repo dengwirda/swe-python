@@ -4,7 +4,7 @@ A simple sandbox for unstructured-mesh spherical shallow water equation solvers.
 
 To run the shallow-water solver:
 
-    python3 swe.py 
+    python3 swe.py
     --mpas-file="path+name-to-mpas-mesh+init-file"
     --num-steps=number-of-time-steps
     --time-step=delta_t
@@ -31,23 +31,24 @@ Various Williamson et al SWE config.:
     --mesh-file="path+name-to-mpas-mesh-file"
     --init-file="path+name-to-mpas-init-file"
     --radius=6371220.
-    --test-case=2, 5
+    --test-case=N
 
 For example, to build + run the barotropic jet test case using the CVT-optimised 
 'level-7' icosahedral mesh:
 
-    python3 jet.py
-    --mesh-file="mesh_cvt_7ref.nc"
-    --init-file="jet_cvt_7ref.nc"
-    --with-pert=True
+    python3 jet.py \
+    --mesh-file="mesh_cvt_7.nc" \
+    --init-file="jet_cvt_7.nc" \
+    --with-pert=True \
     --radius=6371220.
 
-    python3 swe.py
-    --mpas-file="jet_cvt_7ref.nc"
-    --num-steps=4320
-    --time-step=120.
-    --save-freq=270
-    --operators="TRSK-CV"
+    python3 swe.py \
+    --mpas-file="jet_cvt_7.nc" \
+    --num-steps=2400 \
+    --time-step=216. \
+    --save-freq=400 \
+    --stat-freq=100 \
+    --integrate="RK32-FB"
 
-Output is saved to the `out_jet_cvt_7ref.nc` file, which can be opened for visualisation 
+Output is saved to the `out_jet_cvt_7.nc` file, which can be opened for visualisation 
 in paraview.

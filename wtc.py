@@ -21,13 +21,13 @@ def init(name, save, rsph, case):
 
 #------------------------------------ load an MPAS mesh file
 
-    print("Load the mesh file")
+    print("Loading the mesh file...")
 
     mesh = load_mesh(name, rsph)
     
 #------------------------------------ build TRSK matrix op's
 
-    print("Forming coefficients")
+    print("Forming coefficients...")
 
     trsk = trsk_mats(mesh)
 
@@ -356,7 +356,7 @@ def wtc4(name, save, rsph, mesh, trsk):
 
     sig0 = (2.0 * mesh.rsph / 1.0E+06) ** 2 
 
-    print("Integrate for speeds")
+    print("Computing streamfunction...")
 
     sf_vert = np.zeros(
         mesh.vert.size, dtype=np.float64)
@@ -399,7 +399,7 @@ def wtc4(name, save, rsph, mesh, trsk):
 
 
 
-    print("Calc. velocity field")
+    print("Computing velocity field...")
 
     uu_edge = trsk.edge_grad_perp * sf_vert * -1.
 
@@ -410,8 +410,6 @@ def wtc4(name, save, rsph, mesh, trsk):
 
     print("--> max(abs(unrm)):", np.max(uu_edge))
     print("--> sum(div(unrm)):", np.sum(du_cell))
-
-
 
     """
     ff_vert = 2.0 * erot * np.sin(mesh.vert.ylat)
@@ -458,11 +456,10 @@ def wtc4(name, save, rsph, mesh, trsk):
     hh_cell = cell_quad(mesh, fh_cell, fh_vert)
     """
 
-
 #-- solve -g * del^2 h = div f * u_perp for layer thickness,
 #-- leads to a h which is in discrete balance
 
-    print("Find layer thickness")
+    print("Computing flow thickness...")
 
     ff_vert = 2.0 * erot * np.sin(mesh.vert.ylat)
     ff_edge = trsk.edge_stub_sums * ff_vert

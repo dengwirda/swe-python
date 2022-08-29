@@ -5,6 +5,7 @@ import numpy as np
 import netCDF4 as nc
 import argparse
 
+#-- Output MPAS-style *.vtk, requires MPAS-Tools
 
 if (__name__ == "__main__"):
     parser = argparse.ArgumentParser(

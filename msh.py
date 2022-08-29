@@ -2,9 +2,10 @@
 import numpy as np
 from netCDF4 import Dataset
 from scipy.sparse import csr_matrix, spdiags
+from scipy.sparse.csgraph import reverse_cuthill_mckee
 
 
-def load_mesh(name, rsph=None):
+def load_mesh(name, rsph=None, sort=None):
     """
     LOAD-MESH: load the NAME.nc MPAS mesh file into a
     local mesh data structure.
@@ -78,6 +79,9 @@ def load_mesh(name, rsph=None):
         np.array(data.variables["edgesOnVertex"])
     mesh.vert.cell = \
         np.array(data.variables["cellsOnVertex"])
+
+
+    mesh = sort_mesh(mesh, sort)  # redo indexing for locality
 
 
     xhat = (
@@ -239,7 +243,7 @@ def load_mesh(name, rsph=None):
     )
 
     mesh.edge.wing = np.zeros(
-        (mesh.edge.size, 2), dtype=np.float64)
+        (mesh.edge.size, 3), dtype=np.float64)
     mesh.edge.wing[:, 0] = tria_area(
         mesh.rsph,
         np.vstack((mesh.vert.xlon[mesh.edge.vert[:, 1] - 1],
@@ -286,7 +290,126 @@ def load_mesh(name, rsph=None):
     return mesh
 
 
-def load_flow(name):
+def sort_mesh(mesh, sort=None):
+    """
+    SORT-MESH: sort cells, edges and duals in the mesh 
+    to improve cache-locality.
+
+    """
+    # Authors: Darren Engwirda
+
+    mesh.cell.ifwd = np.arange(0, mesh.cell.size) + 1
+    mesh.cell.irev = np.arange(0, mesh.cell.size) + 1
+    mesh.edge.ifwd = np.arange(0, mesh.edge.size) + 1
+    mesh.edge.irev = np.arange(0, mesh.edge.size) + 1
+    mesh.vert.ifwd = np.arange(0, mesh.vert.size) + 1
+    mesh.vert.irev = np.arange(0, mesh.vert.size) + 1
+
+    if (sort is None): return mesh
+
+#-- 1. sort cells via RCM ordering of adjacency matrix
+
+    mesh.cell.ifwd = \
+        reverse_cuthill_mckee(cell_ladj(mesh)) + 1
+    
+    mesh.cell.irev = \
+        np.zeros(mesh.cell.size, dtype=np.int32)
+    mesh.cell.irev[
+        mesh.cell.ifwd - 1] = np.arange(mesh.cell.size) + 1
+
+    mask = mesh.cell.cell > 0
+    mesh.cell.cell[mask] = \
+        mesh.cell.irev[mesh.cell.cell[mask] - 1] + 0
+
+    mask = mesh.edge.cell > 0
+    mesh.edge.cell[mask] = \
+        mesh.cell.irev[mesh.edge.cell[mask] - 1] + 0
+
+    mask = mesh.vert.cell > 0
+    mesh.vert.cell[mask] = \
+        mesh.cell.irev[mesh.vert.cell[mask] - 1] + 0
+
+    mesh.cell.xpos = mesh.cell.xpos[mesh.cell.ifwd - 1]
+    mesh.cell.ypos = mesh.cell.ypos[mesh.cell.ifwd - 1]
+    mesh.cell.zpos = mesh.cell.zpos[mesh.cell.ifwd - 1]
+    mesh.cell.xlon = mesh.cell.xlon[mesh.cell.ifwd - 1]
+    mesh.cell.ylat = mesh.cell.ylat[mesh.cell.ifwd - 1]
+    mesh.cell.vert = mesh.cell.vert[mesh.cell.ifwd - 1]
+    mesh.cell.edge = mesh.cell.edge[mesh.cell.ifwd - 1]
+    mesh.cell.cell = mesh.cell.cell[mesh.cell.ifwd - 1]
+    mesh.cell.topo = mesh.cell.topo[mesh.cell.ifwd - 1]
+
+#-- 2. sort duals via pseudo-linear cell-wise ordering
+
+    mesh.vert.ifwd = np.ravel(mesh.cell.vert)
+    mesh.vert.ifwd = mesh.vert.ifwd[mesh.vert.ifwd > 0]
+
+    __, imap = np.unique(mesh.vert.ifwd, return_index=True)
+
+    mesh.vert.ifwd = mesh.vert.ifwd[np.sort(imap)]
+
+    mesh.vert.irev = \
+        np.zeros(mesh.vert.size, dtype=np.int32)
+    mesh.vert.irev[
+        mesh.vert.ifwd - 1] = np.arange(mesh.vert.size) + 1
+
+    mask = mesh.cell.vert > 0
+    mesh.cell.vert[mask] = \
+        mesh.vert.irev[mesh.cell.vert[mask] - 1] + 0
+
+    mask = mesh.edge.vert > 0
+    mesh.edge.vert[mask] = \
+        mesh.vert.irev[mesh.edge.vert[mask] - 1] + 0
+
+    mesh.vert.xpos = mesh.vert.xpos[mesh.vert.ifwd - 1]
+    mesh.vert.ypos = mesh.vert.ypos[mesh.vert.ifwd - 1]
+    mesh.vert.zpos = mesh.vert.zpos[mesh.vert.ifwd - 1]
+    mesh.vert.xlon = mesh.vert.xlon[mesh.vert.ifwd - 1]
+    mesh.vert.ylat = mesh.vert.ylat[mesh.vert.ifwd - 1]
+    mesh.vert.edge = mesh.vert.edge[mesh.vert.ifwd - 1]
+    mesh.vert.cell = mesh.vert.cell[mesh.vert.ifwd - 1]
+
+#-- 3. sort edges via pseudo-linear cell-wise ordering
+
+    mesh.edge.ifwd = np.ravel(mesh.cell.edge)
+    mesh.edge.ifwd = mesh.edge.ifwd[mesh.edge.ifwd > 0]
+
+    __, imap = np.unique(mesh.edge.ifwd, return_index=True)
+
+    mesh.edge.ifwd = mesh.edge.ifwd[np.sort(imap)]
+
+    mesh.edge.irev = \
+        np.zeros(mesh.edge.size, dtype=np.int32)
+    mesh.edge.irev[
+        mesh.edge.ifwd - 1] = np.arange(mesh.edge.size) + 1
+
+    mask = mesh.cell.edge > 0
+    mesh.cell.edge[mask] = \
+        mesh.edge.irev[mesh.cell.edge[mask] - 1] + 0
+
+    mask = mesh.edge.edge > 0
+    mesh.edge.edge[mask] = \
+        mesh.edge.irev[mesh.edge.edge[mask] - 1] + 0
+
+    mask = mesh.vert.edge > 0
+    mesh.vert.edge[mask] = \
+        mesh.edge.irev[mesh.vert.edge[mask] - 1] + 0
+
+    mesh.edge.xpos = mesh.edge.xpos[mesh.edge.ifwd - 1]
+    mesh.edge.ypos = mesh.edge.ypos[mesh.edge.ifwd - 1]
+    mesh.edge.zpos = mesh.edge.zpos[mesh.edge.ifwd - 1]
+    mesh.edge.xlon = mesh.edge.xlon[mesh.edge.ifwd - 1]
+    mesh.edge.ylat = mesh.edge.ylat[mesh.edge.ifwd - 1]
+    mesh.edge.vert = mesh.edge.vert[mesh.edge.ifwd - 1]
+    mesh.edge.wmul = mesh.edge.wmul[mesh.edge.ifwd - 1]
+    mesh.edge.cell = mesh.edge.cell[mesh.edge.ifwd - 1]
+    mesh.edge.edge = mesh.edge.edge[mesh.edge.ifwd - 1]
+    mesh.edge.topo = mesh.edge.topo[mesh.edge.ifwd - 1]
+
+    return mesh
+
+
+def load_flow(name, mesh=None):
     """
     LOAD-FLOW: load the NAME.nc MPAS mesh file into a
     local flow data structure.
@@ -321,6 +444,7 @@ def load_flow(name):
     flow.vv_edge = np.zeros((step, nedg, nlev), dtype=float)
 
     flow.ke_cell = np.zeros((step, ncel, nlev), dtype=float)
+    flow.ke_dual = np.zeros((step, nvrt, nlev), dtype=float)
 
     flow.rv_cell = np.zeros((step, ncel, nlev), dtype=float)
     flow.pv_cell = np.zeros((step, ncel, nlev), dtype=float)
@@ -363,6 +487,8 @@ def load_flow(name):
 
     if ("ke_cell" in data.variables.keys()):
         flow.ke_cell = np.array(data.variables["ke_cell"])
+    if ("ke_dual" in data.variables.keys()):
+        flow.ke_dual = np.array(data.variables["ke_dual"])
 
     if ("rv_cell" in data.variables.keys()):
         flow.rv_cell = np.array(data.variables["rv_cell"])
@@ -374,7 +500,54 @@ def load_flow(name):
     if ("pv_dual" in data.variables.keys()):
         flow.pv_dual = np.array(data.variables["pv_dual"])
 
+    if (mesh is None): return flow
+
+    flow.hh_cell = flow.hh_cell[:, mesh.cell.ifwd - 1, :]
+
+    flow.zb_cell = flow.zb_cell[mesh.cell.ifwd - 1]
+
+    flow.ff_vert = flow.ff_vert[mesh.vert.ifwd - 1]
+    flow.ff_edge = flow.ff_edge[mesh.edge.ifwd - 1]
+    flow.ff_cell = flow.ff_cell[mesh.cell.ifwd - 1]
+    
+    flow.uu_edge = flow.uu_edge[:, mesh.edge.ifwd - 1, :]
+    flow.vv_edge = flow.vv_edge[:, mesh.edge.ifwd - 1, :]
+
+    flow.ke_cell = flow.ke_cell[:, mesh.cell.ifwd - 1, :]
+    flow.ke_dual = flow.ke_dual[:, mesh.vert.ifwd - 1, :]
+
+    flow.rv_cell = flow.rv_cell[:, mesh.cell.ifwd - 1, :]
+    flow.rv_dual = flow.rv_dual[:, mesh.vert.ifwd - 1, :]
+    flow.pv_cell = flow.pv_cell[:, mesh.cell.ifwd - 1, :]
+    flow.pv_dual = flow.pv_dual[:, mesh.vert.ifwd - 1, :]
+
     return flow
+
+
+def cell_ladj(mesh):
+
+#-- form cellwise sparse adjacency graph
+
+    xvec = np.array([], dtype=np.int32)
+    ivec = np.array([], dtype=np.int32)
+    jvec = np.array([], dtype=np.int32)
+
+    for edge in range(np.max(mesh.cell.topo)):
+
+        mask = mesh.cell.topo > edge
+
+        cidx = np.argwhere(mask).ravel()
+
+        aidx = mesh.cell.cell[mask, edge] - 1
+
+        vals = np.ones(
+            aidx.size, dtype=np.int32)
+
+        ivec = np.hstack((ivec, cidx))
+        jvec = np.hstack((jvec, aidx))
+        xvec = np.hstack((xvec, vals))
+
+    return csr_matrix((xvec, (ivec, jvec)))
 
 
 def tria_area(rs, pa, pb, pc):
