@@ -133,7 +133,7 @@ def init(name, save, rsph=1.E+0, pert=True):
 #-- solve -g * del^2 h = div f * u_perp for layer thickness,
 #-- leads to a h which is in discrete balance
 
-    print("Coputing layer thickness...")
+    print("Computing flow thickness...")
 
     frot = 2.0 * erot * np.sin(mesh.edge.ylat)
 

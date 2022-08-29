@@ -459,7 +459,7 @@ def wtc4(name, save, rsph, mesh, trsk):
 #-- solve -g * del^2 h = div f * u_perp for layer thickness,
 #-- leads to a h which is in discrete balance
 
-    print("Computing layer thickness...")
+    print("Computing flow thickness...")
 
     ff_vert = 2.0 * erot * np.sin(mesh.vert.ylat)
     ff_edge = trsk.edge_stub_sums * ff_vert
