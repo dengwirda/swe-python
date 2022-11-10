@@ -1,6 +1,15 @@
 
 # TC2 convergence runs
 python3 swe.py \
+--mpas-file="tc2_cvt_7.nc" \
+--num-steps=2880 \
+--time-step=360. \
+--save-freq=240 \
+--stat-freq=120 \
+--operators="TRSK-CV" \
+--integrate="RK32-FB"
+
+python3 swe.py \
 --mpas-file="tc2_cvt_6.nc" \
 --num-steps=8640 \
 --time-step=120. \
@@ -75,6 +84,15 @@ python3 swe.py \
 # Barotropic jet roll-up
 python3 swe.py \
 --mpas-file="jet_cvt_7.nc" \
+--num-steps=2400 \
+--time-step=216. \
+--save-freq=400 \
+--stat-freq=100 \
+--operators="TRSK-CV" \
+--integrate="RK32-FB"
+
+python3 swe.py \
+--mpas-file="jet_cvt_7.nc" \
 --num-steps=4320 \
 --time-step=120. \
 --save-freq=540 \
@@ -90,5 +108,18 @@ python3 swe.py \
 --stat-freq=270 \
 --operators="TRSK-CV" \
 --integrate="RK22-FB"
+
+
+# Linear gravity-wave
+python3 swe.py \
+--mpas-file="lt1_cvt_7.nc" \
+--num-steps=234 \
+--time-step=1200. \
+--save-freq=18 \
+--stat-freq=18 \
+--operators="TRSK-CV" \
+--integrate="RK32-FB" \
+--no-advect=TRUE \
+--no-rotate=TRUE
 
 

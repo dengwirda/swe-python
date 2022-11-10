@@ -2,12 +2,15 @@
 import time
 import numpy as np
 
-#-- SWE spatial discretisation using TRSK-like operators
-#--
+""" SWE spatial discretisation using TRSK-like operators
+"""
 #-- Darren Engwirda
 
 HH_TINY        = 1.0E-02
-UU_TINY        = 1.0E-16
+HH_THIN        = 1.0E+02
+UU_TINY        = 1.0E-12
+PV_TINY        = 1.0E-13
+KE_TINY        = 1.0E+03
 
 class base: pass
 tcpu = base()
@@ -19,6 +22,7 @@ tcpu.computeKE = 0.0E+00
 tcpu.computePV = 0.0E+00
 tcpu.advect_PV = 0.0E+00
 tcpu.computeDU = 0.0E+00
+tcpu.computeVU = 0.0E+00
 
 def hrmn_mean(xone, xtwo):
 
@@ -58,7 +62,7 @@ def invariant(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
         mesh, trsk, cnfg, 
         hh_cell, hh_edge, hh_dual, uu_edge, vv_edge,
         ff_dual, ff_edge, ff_cell, 
-        +0.0 * cnfg.time_step, 0.0 * cnfg.pv_upwind)
+        +0.0 * cnfg.time_step)
 
    #pv_sums = np.sum(
    #    +0.5 * mesh.edge.area * hh_edge * pv_edge ** 2)
@@ -70,13 +74,14 @@ def invariant(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
 
 def upwinding(mesh, trsk, cnfg, 
-              sv_dual, sm_dual, sv_cell, sv_edge,
+              sm_dual, sv_dual, sv_cell, sv_edge,
               uu_edge, vv_edge, 
-              delta_t, up_bias):
+              delta_t, sv_tiny,
+              up_kind, up_min_, up_max_):
 
     ttic = time.time()
 
-    if (cnfg.up_scheme == "LUST"):
+    if (up_kind == "LUST"):
 
     #-- upwind bias, a'la Weller
     #-- H. Weller (2012): Controlling the computational modes 
@@ -88,7 +93,8 @@ def upwinding(mesh, trsk, cnfg,
         dy_dual = trsk.dual_lsqr_yprp * dv_edge
         dz_dual = trsk.dual_lsqr_zprp * dv_edge
 
-        sv_bias = np.zeros(mesh.edge.size)
+        sv_bias = np.full(
+            mesh.edge.size, up_min_, dtype=float)
 
         up_edge = np.where(vv_edge <= 0.0)
         dn_edge = np.where(vv_edge >= 0.0)
@@ -111,7 +117,7 @@ def upwinding(mesh, trsk, cnfg,
         ua_edge = np.abs(uu_edge) + UU_TINY
         
         BIAS = (
-            up_bias * va_edge / (ua_edge + va_edge)
+            up_min_ * va_edge / (ua_edge + va_edge)
         )
 
         sv_wind = sv_dual[up_dual] + \
@@ -122,12 +128,13 @@ def upwinding(mesh, trsk, cnfg,
         sv_edge = \
             BIAS * sv_wind + (1.0 - BIAS) * sv_edge
 
-    if (cnfg.up_scheme == "APVM"):
+    if (up_kind == "APVM"):
 
         dn_edge = trsk.edge_grad_norm * sv_cell
         dp_edge = trsk.edge_grad_perp * sv_dual
 
-        sv_bias = np.zeros(mesh.edge.size)
+        sv_bias = np.full(
+            mesh.edge.size, (+0.50), dtype=float)
 
     #-- upwind APVM, scale w time
         up_bias = 1.0                   # hard-coded?
@@ -136,12 +143,19 @@ def upwinding(mesh, trsk, cnfg,
 
         sv_edge = sv_edge - delta_t * sv_apvm
         
-    if (cnfg.up_scheme == "UUST"):
+    if (up_kind == "AUST-CONST"):
+
+    #-- AUST: anticipated upstream method; APVM meets
+    #-- LUST? Upwinds in multi-dimensional sense, vs.
+    #-- LUST, which upwinds via tangential dir. only.
+
+    #-- const. upwinding version
 
         dn_edge = trsk.edge_grad_norm * sv_cell
         dp_edge = trsk.edge_grad_perp * sv_dual
 
-        sv_bias = np.zeros(mesh.edge.size)
+        sv_bias = np.full(
+            mesh.edge.size, up_min_, dtype=float)
 
     #-- upwind APVM, scale w grid
         um_edge = UU_TINY + \
@@ -152,13 +166,15 @@ def upwinding(mesh, trsk, cnfg,
 
         ee_scal = mesh.edge.slen
 
-        sv_edge-= up_bias * ee_scal * sv_wind
+        sv_edge-= up_min_ * ee_scal * sv_wind
 
-    if (cnfg.up_scheme == "AUST"):
+    if (up_kind == "AUST-ADAPT"):
         
     #-- AUST: anticipated upstream method; APVM meets
     #-- LUST? Upwinds in multi-dimensional sense, vs.
     #-- LUST, which upwinds via tangential dir. only.
+
+    #-- adapt. upwinding version
 
         dn_edge = trsk.edge_grad_norm * sv_cell
         dp_edge = trsk.edge_grad_perp * sv_dual
@@ -172,19 +188,13 @@ def upwinding(mesh, trsk, cnfg,
             (trsk.dual_edge_sums * dm_edge) / 3.
 
         ds_dual = np.abs(
-            sv_dual - sm_dual) / (dm_vert + UU_TINY)
+            sv_dual - sm_dual) / (dm_vert + sv_tiny)
 
         ds_dual = ds_dual ** 2
 
         sv_bias = np.sqrt(
             (trsk.edge_vert_sums * ds_dual) / 2.
         )
-
-
-       #ds_edge = \
-       #    (trsk.edge_vert_sums * ds_dual) / 2.
-       
-       #sv_bias = ds_edge / (dm_edge + UU_TINY)
 
     #-- upwind APVM, scale w grid
         um_edge = UU_TINY + \
@@ -195,8 +205,8 @@ def upwinding(mesh, trsk, cnfg,
 
         ee_scal = mesh.edge.slen
 
-        sv_bias = up_bias \
-            + np.minimum(+3./8. - up_bias, sv_bias)
+        sv_bias = up_min_ + \
+            np.minimum(up_max_ - up_min_, sv_bias)
 
         sv_edge-= sv_bias * ee_scal * sv_wind
 
@@ -235,7 +245,7 @@ def compute_H(mesh, trsk, cnfg, hh_cell, uu_edge):
 def computePV(mesh, trsk, cnfg, 
               hh_cell, hh_edge, hh_dual, uu_edge, vv_edge, 
               ff_dual, ff_edge, ff_cell,
-              delta_t, up_bias):
+              delta_t):
 
     ttic = time.time()
 
@@ -245,11 +255,15 @@ def computePV(mesh, trsk, cnfg,
         rv_dual = trsk.dual_curl_sums * uu_edge
         rv_dual/= mesh.vert.area
         
+        rv_dual*= (cnfg.no_advect == False)
+
         av_dual = rv_dual + ff_dual
         pv_dual = av_dual / hh_dual
         
         rv_cell = trsk.cell_kite_sums * rv_dual
         rv_cell/= mesh.cell.area
+
+        rv_cell*= (cnfg.no_advect == False)
 
         av_cell = rv_cell + ff_cell
         pv_cell = av_cell / hh_cell
@@ -270,6 +284,8 @@ def computePV(mesh, trsk, cnfg,
     #-- average rhombi to dual -- a'la Gassmann
         rm_dual = trsk.dual_edge_sums * rm_edge / 3.0
 
+        rm_dual*= (cnfg.no_advect == False)
+
         am_dual = rm_dual + ff_dual
         pm_dual = am_dual / hh_dual
 
@@ -278,24 +294,31 @@ def computePV(mesh, trsk, cnfg,
         pv_edge = trsk.edge_vert_sums * pv_dual / 2.0
         pv_edge+= trsk.edge_dual_reco * pm_dual
 
-        pv_edge = 3. / 8. * pv_edge \
-                + 5. / 8. * pm_edge
+        pv_edge = 1. / 3. * pv_edge \
+                + 2. / 3. * pm_edge
 
         pv_edge, up_edge = upwinding(
             mesh, trsk, cnfg, 
-            pv_dual, pm_dual, pv_cell, pv_edge,
-            uu_edge, vv_edge, delta_t, up_bias)
+            pm_dual, pv_dual, pv_cell, pv_edge,
+            uu_edge, vv_edge, 
+            delta_t, PV_TINY, 
+            cnfg.pv_upwind, 
+            cnfg.pv_min_up, cnfg.pv_max_up)
 
     if (cnfg.operators == "TRSK-MD"):
 
         rv_dual = trsk.dual_curl_sums * uu_edge
         rv_dual/= mesh.vert.area
 
+        rv_dual*= (cnfg.no_advect == False)
+
         av_dual = rv_dual + ff_dual
         pv_dual = av_dual / hh_dual
 
         rv_cell = trsk.cell_kite_sums * rv_dual
         rv_cell/= mesh.cell.area
+
+        rv_cell*= (cnfg.no_advect == False)
 
         av_cell = rv_cell + ff_cell
         pv_cell = av_cell / hh_cell
@@ -305,13 +328,18 @@ def computePV(mesh, trsk, cnfg,
         
         rm_dual = trsk.dual_edge_sums * rv_edge / 3.0
         
+        rm_dual*= (cnfg.no_advect == False)
+
         am_dual = rm_dual + ff_dual
         pm_dual = am_dual / hh_dual
 
         pv_edge, up_edge = upwinding(
             mesh, trsk, cnfg, 
-            pv_dual, pm_dual, pv_cell, pv_edge, 
-            uu_edge, vv_edge, delta_t, up_bias)
+            pm_dual, pv_dual, pv_cell, pv_edge, 
+            uu_edge, vv_edge, 
+            delta_t, PV_TINY, 
+            cnfg.pv_upwind, 
+            cnfg.pv_min_up, cnfg.pv_max_up)
 
     ttoc = time.time()
     tcpu.computePV = tcpu.computePV + (ttoc - ttic)
@@ -320,97 +348,9 @@ def computePV(mesh, trsk, cnfg,
            pv_edge, up_edge
 
 
-"""
 def computeKE(mesh, trsk, cnfg, 
               hh_cell, hh_edge, hh_dual, uu_edge, vv_edge,
-              delta_t, up_bias):
-
-    ttic = time.time()
-
-    if (cnfg.operators == "TRSK-CV"):
-
-        up_edge = np.zeros(mesh.edge.size, dtype=float)
-
-        if ("WEIGHT" in cnfg.ke_scheme):
-
-            hh_thin = 1.0E+02
-
-            ke_edge = 0.5 * (uu_edge ** 2 + 
-                             vv_edge ** 2 )
- 
-            hh_scal = hh_thin / hh_edge
-
-            ke_edge*= ((1.0 + hh_scal) ** 2) ** 2
-
-            ke_cell = trsk.cell_wing_sums * ke_edge
-            ke_cell/= mesh.cell.area
-
-            ke_dual = trsk.dual_stub_sums * ke_edge
-            ke_dual/= mesh.vert.area
-
-            hh_scal = hh_thin / hh_cell
-
-            ke_cell/= ((1.0 + hh_scal) ** 2) ** 2
-
-        else:  # CENTRE
-
-            ke_edge = 0.5 * (uu_edge ** 2 + 
-                             vv_edge ** 2 )
-
-            ke_dual = trsk.dual_stub_sums * ke_edge
-            ke_dual/= mesh.vert.area
-
-            ke_cell = trsk.cell_wing_sums * ke_edge
-            ke_cell/= mesh.cell.area
-
-    if (cnfg.operators == "TRSK-MD"):
-
-        up_edge = np.zeros(mesh.edge.size, dtype=float)
-
-        if ("WEIGHT" in cnfg.ke_scheme):
-
-            hh_thin = 1.0E+02
-
-            ke_edge = 0.25 * uu_edge ** 2 * \
-                  mesh.edge.clen * \
-                  mesh.edge.vlen
-
-            hh_scal = hh_thin / hh_edge
-
-            ke_edge*= ((1.0 + hh_scal) ** 2) ** 2
-
-            ke_cell = trsk.cell_edge_sums * ke_edge
-            ke_cell/= mesh.cell.area
-
-            ke_dual = trsk.dual_edge_sums * ke_edge
-            ke_dual/= mesh.vert.area
-
-            hh_scal = hh_thin / hh_cell
-
-            ke_cell/= ((1.0 + hh_scal) ** 2) ** 2
-
-        else:  # CENTRE
-
-            ke_edge = 0.25 * uu_edge ** 2 * \
-                  mesh.edge.clen * \
-                  mesh.edge.vlen
-
-            ke_dual = trsk.dual_edge_sums * ke_edge
-            ke_dual/= mesh.vert.area
-
-            ke_cell = trsk.cell_edge_sums * ke_edge
-            ke_cell/= mesh.cell.area
-
-    ttoc = time.time()
-    tcpu.computeKE = tcpu.computeKE + (ttoc - ttic)
-
-    return ke_dual, ke_cell, up_edge
-"""
-
-
-def computeKE(mesh, trsk, cnfg, 
-              hh_cell, hh_edge, hh_dual, uu_edge, vv_edge,
-              delta_t, up_bias):
+              delta_t):
 
     ttic = time.time()
 
@@ -439,33 +379,32 @@ def computeKE(mesh, trsk, cnfg,
             ke_cell = trsk.cell_kite_sums * ke_dual
             ke_cell/= mesh.cell.area
 
+            km_dual = \
+                trsk.dual_edge_sums * ke_edge / 3.0
+
             ke_edge, up_edge = upwinding(
                 mesh, trsk, cnfg, 
-                ke_dual, ke_dual, ke_cell, ke_edge, 
-                uu_edge, vv_edge, delta_t, up_bias)
+                km_dual, ke_dual, ke_cell, ke_edge, 
+                uu_edge, vv_edge, 
+                delta_t, KE_TINY,
+                cnfg.ke_upwind, 
+                cnfg.ke_min_up, cnfg.ke_max_up)
 
-        if ("WEIGHT" in cnfg.ke_scheme):
+        if ("SKINNY" in cnfg.ke_scheme):
 
-            hh_thin = 1.0E+02
-            hh_tiny = 1.0E-08
- 
-            hh_scal = \
-                limit_div(hh_thin, hh_edge, hh_tiny)
+            hh_scal = HH_THIN / hh_edge
 
-            ke_edge = ke_edge * \
-                ((1.0 + hh_scal) ** 2) ** 2
-
-            ke_dual = trsk.dual_stub_sums * ke_edge
-            ke_dual/= mesh.vert.area
+            ke_edge*= ((1.0 + hh_scal) ** 2) ** 2
 
             ke_cell = trsk.cell_wing_sums * ke_edge
             ke_cell/= mesh.cell.area
 
-            hh_scal = \
-                limit_div(hh_thin, hh_cell, hh_tiny)
+            ke_dual = trsk.dual_stub_sums * ke_edge
+            ke_dual/= mesh.vert.area
 
-            ke_cell = ke_cell / \
-                ((1.0 + hh_scal) ** 2) ** 2
+            hh_scal = HH_THIN / hh_cell
+
+            ke_cell/= ((1.0 + hh_scal) ** 2) ** 2
 
         else:
 
@@ -482,8 +421,7 @@ def computeKE(mesh, trsk, cnfg,
         if ("CENTRE" in cnfg.ke_scheme):
 
             ke_edge = 0.25 * uu_edge ** 2 * \
-                  mesh.edge.clen * \
-                  mesh.edge.vlen
+                  mesh.edge.clen * mesh.edge.vlen
 
         if ("UPWIND" in cnfg.ke_scheme):
 
@@ -500,40 +438,35 @@ def computeKE(mesh, trsk, cnfg,
             ke_cell = trsk.cell_kite_sums * ke_dual
             ke_cell/= mesh.cell.area
 
+            km_dual = \
+                trsk.dual_edge_sums * ke_edge / 3.0
+
             ke_edge, up_edge = upwinding(
                 mesh, trsk, cnfg, 
                 ke_dual, ke_dual, ke_cell, ke_edge, 
-                uu_edge, vv_edge, delta_t, up_bias)
+                uu_edge, vv_edge, 
+                delta_t, KE_TINY, 
+                cnfg.ke_upwind,
+                cnfg.ke_min_up, cnfg.ke_max_up) 
 
             ke_edge = 0.25 * ke_edge ** 1 * \
-                  mesh.edge.clen * \
-                  mesh.edge.vlen
+                  mesh.edge.clen * mesh.edge.vlen
 
-        if ("WEIGHT" in cnfg.ke_scheme):
+        if ("SKINNY" in cnfg.ke_scheme):
 
-            hh_thin = 1.0E+02
-            hh_tiny = 1.0E-08
+            hh_scal = HH_THIN / hh_edge
 
-            hs_edge = trsk.edge_vert_sums * hh_dual
-            hs_edge*= 0.5E+00
-            
-            hh_scal = \
-                limit_div(hh_thin, hs_edge, hh_tiny)
-
-            ke_edge = ke_edge * \
-                ((1.0 + hh_scal) ** 2) ** 2
-
-            ke_dual = trsk.dual_edge_sums * ke_edge
-            ke_dual/= mesh.vert.area
+            ke_edge*= ((1.0 + hh_scal) ** 2) ** 2
 
             ke_cell = trsk.cell_edge_sums * ke_edge
             ke_cell/= mesh.cell.area
 
-            hh_scal = \
-                limit_div(hh_thin, hh_cell, hh_tiny)
+            ke_dual = trsk.dual_edge_sums * ke_edge
+            ke_dual/= mesh.vert.area
 
-            ke_cell = ke_cell / \
-                ((1.0 + hh_scal) ** 2) ** 2
+            hh_scal = HH_THIN / hh_cell
+
+            ke_cell/= ((1.0 + hh_scal) ** 2) ** 2
 
         else:
 
@@ -567,8 +500,6 @@ def advect_PV(mesh, trsk, cnfg, uh_edge, pv_edge):
 
 def computeDU(mesh, trsk, cnfg, uu_edge):
 
-#-- Divergence(-only) dissipation
-
     if (cnfg.du_damp_2 == 0 and 
         cnfg.du_damp_4 == 0):
         return np.zeros(mesh.edge.size, dtype=float)
@@ -599,5 +530,22 @@ def computeDU(mesh, trsk, cnfg, uu_edge):
     tcpu.computeDU = tcpu.computeDU + (ttoc - ttic)
 
     return d2_edge - d4_edge
+
+
+def computeVU(mesh, trsk, cnfg, uu_edge):
+
+    if (cnfg.vu_damp_2 == 0 and 
+        cnfg.vu_damp_4 == 0):
+        return np.zeros(mesh.edge.size, dtype=float)
+
+    ttic = time.time()
+
+    v2_edge = np.zeros(mesh.edge.size, dtype=float)
+    v4_edge = np.zeros(mesh.edge.size, dtype=float)
+
+    ttoc = time.time()
+    tcpu.computeVU = tcpu.computeVU + (ttoc - ttic)
+
+    return v2_edge - v4_edge
 
 
