@@ -107,7 +107,8 @@ def swe(cnfg):
             rv_cell, pv_cell, \
             rv_dual, pv_dual, \
             ke_bias, pv_bias = step_RK32(
-                mesh, trsk, flow, cnfg, hh_cell, uu_edge)
+                mesh, trsk, flow, cnfg, hh_cell, uu_edge,
+                cnfg.betas)
 
         if ("SP33" in cnfg.integrate):
 
@@ -535,6 +536,14 @@ if (__name__ == "__main__"):
         type=lambda x: bool(strtobool(str(x.strip()))),
         required=False, 
         default=False, help="Disable coriolis terms.")
+
+    parser.add_argument(
+        "--betas", dest="betas", type=float,
+        required=False,
+        nargs=3,
+        default=[1.0/3.0, 1.0/2.0, 89.0/300.0],
+        help="FBFCs for RK32")
+
 
     swe(parser.parse_args())
 

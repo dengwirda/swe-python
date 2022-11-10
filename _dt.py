@@ -96,7 +96,7 @@ def step_RK22(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
            rv_dual, pv_dual, ke_bias, pv_bias
 
 
-def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
+def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge, betas):
 
 #-- A 3-stage RK2 + FB scheme, a'la MPAS-A:
 #-- L.J. Wicker, W.C. Skamarock (2002): Time-Splitting Methods for 
@@ -109,8 +109,7 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     ttic = time.time()
 
-   #BETA = (1.0 / 3.0) * ("FB" in cnfg.integrate)
-    BETA = (2.0 / 5.0) * ("FB" in cnfg.integrate)
+    BETA = betas[0] * ("FB" in cnfg.integrate)
 
     rh_cell = rhs_all_h(
         mesh, trsk, flow, cnfg, hh_cell, uu_edge)
@@ -144,8 +143,7 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     ttic = time.time()
 
-   #BETA = (1.0 / 2.0) * ("FB" in cnfg.integrate)
-    BETA = (13. / 30.) * ("FB" in cnfg.integrate)
+    BETA = betas[1] * ("FB" in cnfg.integrate)
    
     rh_cell = rhs_all_h(
         mesh, trsk, flow, cnfg, h1_cell, u1_edge)
@@ -180,9 +178,7 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     ttic = time.time()
 
-   #BETA = ( 89./ 300) * ("FB" in cnfg.integrate)
-   #BETA = ( 7.0/ 24.) * ("FB" in cnfg.integrate)
-    BETA = ( 29./ 80.) * ("FB" in cnfg.integrate)
+    BETA = betas[2] * ("FB" in cnfg.integrate)
 
     rh_cell = rhs_all_h(
         mesh, trsk, flow, cnfg, h2_cell, u2_edge)
