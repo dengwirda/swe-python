@@ -549,7 +549,7 @@ if (__name__ == "__main__"):
         "--FB-weight", dest="fb_weight", type=float,
         required=False,
         nargs='*',
-        help="FB weights for RK32.")
+        help="Forward-backward weights for integrators.")
 
 
     swe(parser.parse_args())
