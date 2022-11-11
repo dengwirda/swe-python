@@ -539,8 +539,7 @@ if (__name__ == "__main__"):
     parser.add_argument(
         "--FB-weight", dest="fb_weight", type=float,
         required=False,
-        nargs=3,
-        default=[1.0/3.0, 1.0/2.0, 89.0/300.0],
+        nargs='*',
         help="FB weights for RK32.")
 
 
