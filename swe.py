@@ -51,6 +51,15 @@ def swe(cnfg):
     path, file = os.path.split(name)
     save = os.path.join(path, "out_" + file)
 
+    if cnfg.fb_weight:
+        nweights = len(cnfg.fb_weight)
+        if ("RK22" in cnfg.integrate) and (nweights != 2):
+            raise Exception("RK22 requires 2 FB-weights, " +
+                            "{} provided".format(nweights))
+        elif ("RK32" in cnfg.integrate) and (nweights != 3):
+            raise Exception("RK32 requires 3 FB-weights, " +
+                            "{} provided".format(nweights))
+
     print("Loading input assets...")
     
     # load mesh + init. conditions
