@@ -107,8 +107,7 @@ def swe(cnfg):
             rv_cell, pv_cell, \
             rv_dual, pv_dual, \
             ke_bias, pv_bias = step_RK32(
-                mesh, trsk, flow, cnfg, hh_cell, uu_edge,
-                cnfg.betas)
+                mesh, trsk, flow, cnfg, hh_cell, uu_edge)
 
         if ("SP33" in cnfg.integrate):
 
