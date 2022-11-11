@@ -116,7 +116,6 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
     ttic = time.time()
     
     if cnfg.fb_weight:
-        print('no def')
         BETA = cnfg.fb_weight[0] * ("FB" in cnfg.integrate)
     else:
         BETA = (1.0 / 3.0) * ("FB" in cnfg.integrate)
