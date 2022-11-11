@@ -109,7 +109,7 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     ttic = time.time()
 
-    BETA = cnfg.betas[0] * ("FB" in cnfg.integrate)
+    BETA = cnfg.fb_weight[0] * ("FB" in cnfg.integrate)
 
     rh_cell = rhs_all_h(
         mesh, trsk, flow, cnfg, hh_cell, uu_edge)
@@ -143,7 +143,7 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     ttic = time.time()
 
-    BETA = cnfg.betas[1] * ("FB" in cnfg.integrate)
+    BETA = cnfg.fb_weight[1] * ("FB" in cnfg.integrate)
    
     rh_cell = rhs_all_h(
         mesh, trsk, flow, cnfg, h1_cell, u1_edge)
@@ -178,7 +178,7 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     ttic = time.time()
 
-    BETA = cnfg.betas[2] * ("FB" in cnfg.integrate)
+    BETA = cnfg.fb_weight[2] * ("FB" in cnfg.integrate)
 
     rh_cell = rhs_all_h(
         mesh, trsk, flow, cnfg, h2_cell, u2_edge)

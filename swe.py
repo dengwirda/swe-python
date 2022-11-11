@@ -537,11 +537,11 @@ if (__name__ == "__main__"):
         default=False, help="Disable coriolis terms.")
 
     parser.add_argument(
-        "--betas", dest="betas", type=float,
+        "--FB-weight", dest="fb_weight", type=float,
         required=False,
         nargs=3,
         default=[1.0/3.0, 1.0/2.0, 89.0/300.0],
-        help="FBFCs for RK32")
+        help="FB weights for RK32.")
 
 
     swe(parser.parse_args())
