@@ -23,7 +23,10 @@ def step_RK22(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     ttic = time.time()
 
-    BETA = (1.0 / 3.0) * ("FB" in cnfg.integrate)
+    if cnfg.fb_weight:
+        BETA = cnfg.fb_weight[0] * ("FB" in cnfg.integrate)
+    else:
+        BETA = (1.0 / 3.0) * ("FB" in cnfg.integrate)
 
     rh_cell = rhs_all_h(
         mesh, trsk, flow, cnfg, hh_cell, uu_edge)
@@ -57,7 +60,10 @@ def step_RK22(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     ttic = time.time()
 
-    BETA = (2.0 / 3.0) * ("FB" in cnfg.integrate)
+    if cnfg.fb_weight:
+        BETA = cnfg.fb_weight[1] * ("FB" in cnfg.integrate)
+    else:
+        BETA = (2.0 / 3.0) * ("FB" in cnfg.integrate)
 
     hm_cell = 0.5 * hh_cell + 0.5 * h1_cell
     um_edge = 0.5 * uu_edge + 0.5 * u1_edge
@@ -108,9 +114,12 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 #-- 1st RK + FB stage
 
     ttic = time.time()
+    
+    if cnfg.fb_weight:
+        BETA = cnfg.fb_weight[0] * ("FB" in cnfg.integrate)
+    else:
+        BETA = (1.0 / 3.0) * ("FB" in cnfg.integrate)
 
-   #BETA = (1.0 / 3.0) * ("FB" in cnfg.integrate)
-    BETA = (2.0 / 5.0) * ("FB" in cnfg.integrate)
 
     rh_cell = rhs_all_h(
         mesh, trsk, flow, cnfg, hh_cell, uu_edge)
@@ -144,8 +153,10 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     ttic = time.time()
 
-   #BETA = (1.0 / 2.0) * ("FB" in cnfg.integrate)
-    BETA = (13. / 30.) * ("FB" in cnfg.integrate)
+    if cnfg.fb_weight:
+        BETA = cnfg.fb_weight[1] * ("FB" in cnfg.integrate)
+    else:
+        BETA = (1.0 / 2.0) * ("FB" in cnfg.integrate)
    
     rh_cell = rhs_all_h(
         mesh, trsk, flow, cnfg, h1_cell, u1_edge)
@@ -180,9 +191,10 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     ttic = time.time()
 
-   #BETA = ( 89./ 300) * ("FB" in cnfg.integrate)
-   #BETA = ( 7.0/ 24.) * ("FB" in cnfg.integrate)
-    BETA = ( 29./ 80.) * ("FB" in cnfg.integrate)
+    if cnfg.fb_weight:
+        BETA = cnfg.fb_weight[2] * ("FB" in cnfg.integrate)
+    else:
+        BETA = (89.0 / 300.0) * ("FB" in cnfg.integrate)
 
     rh_cell = rhs_all_h(
         mesh, trsk, flow, cnfg, h2_cell, u2_edge)
