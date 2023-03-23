@@ -170,9 +170,14 @@ def step_RK32(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     ttic = time.time()
 
-    # centred at 1/4 for 1/2 step?
-    hb_cell = h2_cell * (0.0 + 1.0 * BETA) + \
-              hh_cell * (1.0 - 1.0 * BETA)
+    # when FB is not in use, the data for h used to advance 
+    # u in the second stage needs to be manually set to 
+    # the first stage data for h
+    if "FB" in cnfg.integrate:
+        hb_cell = h2_cell * (0.0 + 1.0 * BETA) + \
+                  hh_cell * (1.0 - 1.0 * BETA)
+    else:
+        hb_cell = h1_cell
 
     ru_edge, \
     ke_cell, ke_dual, ke_bias, \
