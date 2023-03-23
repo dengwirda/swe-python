@@ -338,3 +338,140 @@ def step_SP33(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
            rv_dual, pv_dual, ke_bias, pv_bias
 
 
+def step_RK4(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
+
+#-- classical four stage, fourth order Runge-Kutta method:
+#-- R. LeVeque (2007): Finite difference methods for ordinary
+#-- and partial differential equations, ch. 5
+#-- doi.org/10.1137/1.9780898717839.ch5
+
+#-- 1st RK stage 
+
+    ttic = time.time()
+
+    rh1_cell = rhs_all_h(
+        mesh, trsk, flow, cnfg, hh_cell, uu_edge)
+
+    h1_cell = ( 
+        hh_cell - 1.0 / 2.0 * cnfg.time_step * rh1_cell
+    )
+
+    ttoc = time.time()
+    tcpu.thickness = tcpu.thickness + (ttoc - ttic)
+
+    ttic = time.time()
+
+    ru1_edge, \
+    ke_cell, ke_dual, ke_bias, \
+    rv_cell, pv_cell, \
+    rv_dual, pv_dual, pv_bias = rhs_all_u(
+        mesh, trsk, flow, cnfg, hh_cell, uu_edge)
+    
+    u1_edge = ( 
+        uu_edge - 1.0 / 2.0 * cnfg.time_step * ru1_edge
+    )
+
+    ttoc = time.time()
+    tcpu.momentum_ = tcpu.momentum_ + (ttoc - ttic)
+
+#-- 2nd RK stage
+
+    ttic = time.time()
+
+    rh2_cell = rhs_all_h(
+        mesh, trsk, flow, cnfg, h1_cell, u1_edge)
+
+    h2_cell = (
+        hh_cell - 1.0 / 2.0 * cnfg.time_step * rh2_cell
+    )
+
+    ttoc = time.time()
+    tcpu.thickness = tcpu.thickness + (ttoc - ttic)
+
+    ttic = time.time()
+
+    ru2_edge, \
+    ke_cell, ke_dual, ke_bias, \
+    rv_cell, pv_cell, \
+    rv_dual, pv_dual, pv_bias = rhs_all_u(
+        mesh, trsk, flow, cnfg, h1_cell, u1_edge)
+    
+    u2_edge = ( 
+        uu_edge - 1.0 / 2.0 * cnfg.time_step * ru2_edge
+    )
+
+    ttoc = time.time()
+    tcpu.momentum_ = tcpu.momentum_ + (ttoc - ttic)
+
+#-- 3rd RK stage
+
+    ttic = time.time()
+
+    rh3_cell = rhs_all_h(
+        mesh, trsk, flow, cnfg, h2_cell, u2_edge)
+
+    h3_cell = (
+        hh_cell - 1.0 / 1.0 * cnfg.time_step * rh3_cell
+    )
+
+    ttoc = time.time()
+    tcpu.thickness = tcpu.thickness + (ttoc - ttic)
+
+    ttic = time.time()
+
+    ru3_edge, \
+    ke_cell, ke_dual, ke_bias, \
+    rv_cell, pv_cell, \
+    rv_dual, pv_dual, pv_bias = rhs_all_u(
+        mesh, trsk, flow, cnfg, h2_cell, u2_edge)
+    
+    u3_edge = ( 
+        uu_edge - 1.0 / 1.0 * cnfg.time_step * ru3_edge
+    )
+
+    ttoc = time.time()
+    tcpu.momentum_ = tcpu.momentum_ + (ttoc - ttic)
+
+#-- 4th RK stage
+
+    ttic = time.time()
+
+    rh4_cell = rhs_all_h(
+        mesh, trsk, flow, cnfg, h3_cell, u3_edge)
+
+    h4_cell = (
+        hh_cell - 1.0 / 6.0 * cnfg.time_step * (
+            rh1_cell + 
+            2 * rh2_cell + 
+            2 * rh3_cell +
+            rh4_cell
+        )
+    )
+
+    ttoc = time.time()
+    tcpu.thickness = tcpu.thickness + (ttoc - ttic)
+
+    ttic = time.time()
+
+    ru4_edge, \
+    ke_cell, ke_dual, ke_bias, \
+    rv_cell, pv_cell, \
+    rv_dual, pv_dual, pv_bias = rhs_all_u(
+        mesh, trsk, flow, cnfg, h3_cell, u3_edge)
+    
+    u4_edge = ( 
+        uu_edge - 1.0 / 6.0 * cnfg.time_step * (
+            ru1_edge +
+            2 * ru2_edge +
+            2 * ru3_edge +
+            ru4_edge
+        )
+    )
+
+    ttoc = time.time()
+    tcpu.momentum_ = tcpu.momentum_ + (ttoc - ttic)
+
+    return h4_cell, u4_edge, ke_cell, ke_dual, \
+           rv_cell, pv_cell, \
+           rv_dual, pv_dual, ke_bias, pv_bias
+

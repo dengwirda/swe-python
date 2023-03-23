@@ -10,7 +10,7 @@ from ops import trsk_mats
 
 from _dx import HH_TINY, UU_TINY
 from _dx import invariant, tcpu
-from _dt import step_RK22, step_RK32, step_SP33
+from _dt import step_RK22, step_RK32, step_SP33, step_RK4
 
 def strtobool(val):
     """
@@ -124,6 +124,14 @@ def swe(cnfg):
             rv_cell, pv_cell, \
             rv_dual, pv_dual, \
             ke_bias, pv_bias = step_SP33(
+                mesh, trsk, flow, cnfg, hh_cell, uu_edge)
+        
+        if ("RK4" in cnfg.integrate):
+
+            hh_cell, uu_edge, ke_cell, ke_dual, \
+            rv_cell, pv_cell, \
+            rv_dual, pv_dual, \
+            ke_bias, pv_bias = step_RK4(
                 mesh, trsk, flow, cnfg, hh_cell, uu_edge)
 
         if (step % cnfg.stat_freq == 0):
