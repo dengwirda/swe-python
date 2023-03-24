@@ -94,7 +94,7 @@ def invariant(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
     ke_edge = ke_edge * hh_edge * mesh.edge.clen \
                                 * mesh.edge.vlen
 
-    pe_cell = flow.grav * (hh_cell * 0.5 + zb_cell)
+    pe_cell = flow.grav * (hh_cell * 0.5 - zb_cell)
 
     pe_cell = pe_cell * hh_cell * mesh.cell.area
 

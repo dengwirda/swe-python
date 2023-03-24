@@ -32,9 +32,10 @@ def swe(cnfg):
     SWE: solve the nonlinear SWE on generalised MPAS meshes.
 
     """
-    # Authors:  Darren Engwirda, 
+    # Authors:  Darren Engwirda,
     #           Jeremy Lilly, 
     #           Sara Calandrini
+    # Contact:  dengwirda@lanl.gov
 
     cnfg.stat_freq = np.minimum(
         cnfg.save_freq, cnfg.stat_freq)
@@ -136,6 +137,12 @@ def swe(cnfg):
                     mesh.edge.irev - 1], (1, mesh.edge.size, 1))
             data.variables["hh_cell"][freq, :, :] = \
                 np.reshape(hh_cell[
+                    mesh.cell.irev - 1], (1, mesh.cell.size, 1))
+
+            zt_cell = flow.zb_cell + hh_cell
+
+            data.variables["zt_cell"][freq, :, :] = \
+                np.reshape(zt_cell[
                     mesh.cell.irev - 1], (1, mesh.cell.size, 1))
 
             du_cell = trsk.cell_flux_sums * uu_edge
@@ -330,6 +337,7 @@ def init_file(name, cnfg, save):
    
     data.createVariable("zb_cell", "f8", ("nCells"))
     data["zb_cell"][:] = flow.zb_cell
+
     data.createVariable("ff_cell", "f8", ("nCells"))
     data["ff_cell"][:] = flow.ff_cell
     data.createVariable("ff_edge", "f8", ("nEdges"))
@@ -352,6 +360,10 @@ def init_file(name, cnfg, save):
     data.createVariable(
         "hh_cell", "f8", ("Time", "nCells", "nVertLevels"))    
     data["hh_cell"].long_name = "Layer thickness on cells"
+
+    data.createVariable(
+        "zt_cell", "f4", ("Time", "nCells", "nVertLevels"))    
+    data["zt_cell"].long_name = "Top surface of layer on cells"
 
     data.createVariable(
         "du_cell", "f4", ("Time", "nCells", "nVertLevels"))    
