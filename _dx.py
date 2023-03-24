@@ -24,6 +24,7 @@ tcpu.advect_PV = 0.0E+00
 tcpu.computeDU = 0.0E+00
 tcpu.computeVU = 0.0E+00
 tcpu.computeDW = 0.0E+00
+tcpu.computeCd = 0.0E+00
 
 def hrmn_mean(xone, xtwo):
 
@@ -591,6 +592,29 @@ def computeVU(mesh, trsk, cnfg, uu_edge):
     tcpu.computeVU = tcpu.computeVU + (ttoc - ttic)
 
     return v2_edge - v4_edge
+
+
+def computeCd(mesh, trsk, cnfg, hh_cell, uu_edge):
+
+    VONK = 0.4  # von karman parameter
+
+    hh_edge = hrmn_mean(
+        hh_cell[mesh.edge.cell[:, 0] - 1], 
+        hh_cell[mesh.edge.cell[:, 1] - 1])
+
+    cd_edge = (
+        VONK / np.log(0.5 * hh_edge / cnfg.loglaw_z0)
+        ) ** +2
+
+    cd_edge = np.minimum(cnfg.loglaw_hi, cd_edge)
+    cd_edge = np.maximum(cnfg.loglaw_lo, cd_edge)
+
+    vv_edge = trsk.edge_lsqr_perp * uu_edge * +1.
+
+    ke_edge = 0.5 * (uu_edge ** 2 + 
+                     vv_edge ** 2 )
+
+    return cd_edge * np.sqrt(2. * ke_edge) / hh_edge
 
 
 def computeMS(mesh, trsk, cnfg, 

@@ -10,7 +10,7 @@ from ops import trsk_mats
 
 from _dx import HH_TINY, UU_TINY
 from _dx import invariant, diag_vars, tcpu
-from _dt import step_RK22, step_RK32, step_SP33, step_RK44
+from _dt import step_eqns
 
 def strtobool(val):
     """
@@ -101,33 +101,10 @@ def swe(cnfg):
 
         if (step > 0):
         #-- 0-th step is just to write ICs to output...
-            if ("RK22" in cnfg.integrate):
-
-                hh_cell, uu_edge, \
-                ht_cell, ut_edge = step_RK22(
-                    mesh, trsk, flow, cnfg, 
-                    hh_cell, uu_edge, ht_cell, ut_edge)
-
-            if ("RK32" in cnfg.integrate):
-
-                hh_cell, uu_edge, \
-                ht_cell, ut_edge = step_RK32(
-                    mesh, trsk, flow, cnfg, 
-                    hh_cell, uu_edge, ht_cell, ut_edge)
-
-            if ("SP33" in cnfg.integrate):
-
-                hh_cell, uu_edge, \
-                ht_cell, ut_edge = step_SP33(
-                    mesh, trsk, flow, cnfg, 
-                    hh_cell, uu_edge, ht_cell, ut_edge)
-
-            if ("RK44" in cnfg.integrate):
-
-                hh_cell, uu_edge, \
-                ht_cell, ut_edge = step_RK44(
-                    mesh, trsk, flow, cnfg, 
-                    hh_cell, uu_edge, ht_cell, ut_edge)
+            hh_cell, uu_edge, \
+            ht_cell, ut_edge = step_eqns(
+                mesh, trsk, flow, cnfg, 
+                hh_cell, uu_edge, ht_cell, ut_edge)
 
         if (step % cnfg.stat_freq == 0):
 
@@ -239,6 +216,8 @@ def swe(cnfg):
     print("tcpu.computePV:", tcpu.computePV)
     print("tcpu.advect_PV:", tcpu.advect_PV)
     print("tcpu.computeDU:", tcpu.computeDU)
+    print("tcpu.computeVU:", tcpu.computeVU)
+    print("tcpu.computeCd:", tcpu.computeCd)
 
     data = nc.Dataset(
         save, "a", format="NETCDF3_64BIT_OFFSET")
@@ -533,6 +512,24 @@ if (__name__ == "__main__"):
         default=0.E+00,
         required=False,
         help="DEL^4 damping coeff. {DAMP = +0.E+00}.")
+
+    parser.add_argument(
+        "--loglaw-z0", dest="loglaw_z0", type=float,
+        default=0.E+00,
+        required=False,
+        help="Log-law roughness-len. {Z0 = +0.E+00}.")
+
+    parser.add_argument(
+        "--loglaw-lo", dest="loglaw_lo", type=float,
+        default=0.E+00,
+        required=False,
+        help="Log-law min. cd coeff. {Cd > +0.E+00}.")
+
+    parser.add_argument(
+        "--loglaw-hi", dest="loglaw_hi", type=float,
+        default=0.E+00,
+        required=False,
+        help="Log-law max. cd coeff. {Cd < +0.E+00}.")
 
     parser.add_argument(
         "--operators", dest="operators", type=str,

@@ -6,8 +6,91 @@ import numpy as np
 """
 #-- Darren Engwirda, Jeremy Lilly
 
+from _dx import computeCd
 from _dx import tcpu
 from rhs import rhs_all_u, rhs_all_h
+
+def step_eqns(mesh, trsk, flow, cnfg, 
+              hh_cell, uu_edge,     # state
+              ht_cell, ut_edge):    # time-derivatives
+
+    BIAS = 5.0 / 9.0  # theta method centre
+
+    if (cnfg.loglaw_z0 > 0.):
+    #-- 1st part of bot. drag strang splits
+        ttic = time.time()
+
+        cd_edge = computeCd(
+            mesh, trsk, cnfg, hh_cell, uu_edge)
+
+    #-- theta scheme: explicit tend.
+        us_edge = uu_edge - 0.5 * cnfg.time_step * \
+            (1. - BIAS) * cd_edge * uu_edge
+
+    #-- theta scheme: implicit solve
+        us_edge/= (1. + 
+            0.5 * BIAS * cnfg.time_step * cd_edge)
+
+        ttoc = time.time()
+        tcpu.computeCd = \
+            tcpu.computeCd + (ttoc - ttic)
+
+    else:
+    #-- zero bot. drag: no operator split needed
+        us_edge = uu_edge[:]
+
+    #-- step the rest of the shallow-water eqn's
+
+    if ("RK22" in cnfg.integrate):
+
+        hs_cell, us_edge, \
+        ht_cell, ut_edge = step_RK22(
+            mesh, trsk, flow, cnfg, 
+            hh_cell, us_edge, ht_cell, ut_edge)
+
+    if ("RK32" in cnfg.integrate):
+
+        hs_cell, us_edge, \
+        ht_cell, ut_edge = step_RK32(
+            mesh, trsk, flow, cnfg, 
+            hh_cell, us_edge, ht_cell, ut_edge)
+
+    if ("SP33" in cnfg.integrate):
+
+        hs_cell, us_edge, \
+        ht_cell, ut_edge = step_SP33(
+            mesh, trsk, flow, cnfg, 
+            hh_cell, us_edge, ht_cell, ut_edge)
+
+    if ("RK44" in cnfg.integrate):
+
+        hs_cell, us_edge, \
+        ht_cell, ut_edge = step_RK44(
+            mesh, trsk, flow, cnfg, 
+            hh_cell, us_edge, ht_cell, ut_edge)
+
+
+    if (cnfg.loglaw_z0 > 0.):
+    #-- 2nd part of bot. drag strang splits
+        ttic = time.time()
+
+        cd_edge = computeCd(
+            mesh, trsk, cnfg, hs_cell, us_edge)
+
+    #-- theta scheme: explicit tend.
+        us_edge = us_edge - 0.5 * cnfg.time_step * \
+            (1. - BIAS) * cd_edge * us_edge
+
+    #-- theta scheme: implicit solve
+        us_edge/= (1. + 
+            0.5 * BIAS * cnfg.time_step * cd_edge)
+
+        ttoc = time.time()
+        tcpu.computeCd = \
+            tcpu.computeCd + (ttoc - ttic)
+
+    return hs_cell, us_edge, ht_cell, ut_edge
+
 
 def step_RK22(mesh, trsk, flow, cnfg, 
               hh_cell, uu_edge,     # state
@@ -134,8 +217,8 @@ def step_RK32(mesh, trsk, flow, cnfg,
     if cnfg.fb_weight:
         BETA = cnfg.fb_weight[1]
     else:
-        BETA = 0.333333333333333
-       #BETA = 0.387500000000000
+       #BETA = 0.333333333333333
+        BETA = 0.387500000000000
 
     BETA *= ("FB" in cnfg.integrate)
 
@@ -179,8 +262,8 @@ def step_RK32(mesh, trsk, flow, cnfg,
     if cnfg.fb_weight:
         BETA = cnfg.fb_weight[1]
     else:
-        BETA = 0.500000000000000
-       #BETA = 0.450000000000000
+       #BETA = 0.500000000000000
+        BETA = 0.450000000000000
 
     BETA *= ("FB" in cnfg.integrate)
 
@@ -233,8 +316,8 @@ def step_RK32(mesh, trsk, flow, cnfg,
         BETA = cnfg.fb_weight[2]
     else:
        #BETA = 0.291666666666667
-        BETA = 0.296666666666667
-       #BETA = 0.345000000000000
+       #BETA = 0.296666666666667
+        BETA = 0.345000000000000
 
     BETA *= ("FB" in cnfg.integrate)
 
