@@ -23,12 +23,50 @@ tcpu.computePV = 0.0E+00
 tcpu.advect_PV = 0.0E+00
 tcpu.computeDU = 0.0E+00
 tcpu.computeVU = 0.0E+00
+tcpu.computeDW = 0.0E+00
 
 def hrmn_mean(xone, xtwo):
 
 #-- harmonic mean of two vectors (ie. biased toward lesser)
 
     return +2.0 * xone * xtwo / (xone + xtwo)
+
+
+def diag_vars(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
+
+#-- compute diagnostic variables from the current state
+
+    ff_dual = flow.ff_vert
+    ff_edge = flow.ff_edge
+    ff_cell = flow.ff_cell
+
+    ff_cell*= (cnfg.no_rotate == False)
+    ff_edge*= (cnfg.no_rotate == False)
+    ff_dual*= (cnfg.no_rotate == False)
+
+    zb_cell = flow.zb_cell
+
+    vv_edge = trsk.edge_lsqr_perp * uu_edge * +1.
+
+    hh_dual, \
+    hh_edge = compute_H(mesh, trsk, cnfg, hh_cell, uu_edge)
+
+    ke_dual, ke_cell, ke_bias = computeKE(
+        mesh, trsk, cnfg, 
+        hh_cell, hh_edge, hh_dual, 
+        uu_edge, vv_edge,
+        +0.0 * cnfg.time_step)
+
+    rv_dual, pv_dual, rv_cell, pv_cell, \
+    pv_edge, pv_bias = computePV(
+        mesh, trsk, cnfg, 
+        hh_cell, hh_edge, hh_dual, uu_edge, vv_edge,
+        ff_dual, ff_edge, ff_cell, 
+        +0.0 * cnfg.time_step)
+
+    return ke_cell, ke_dual, \
+           rv_cell, pv_cell, \
+           rv_dual, pv_dual, ke_bias, pv_bias
 
 
 def invariant(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
@@ -38,6 +76,10 @@ def invariant(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
     ff_dual = flow.ff_vert
     ff_edge = flow.ff_edge
     ff_cell = flow.ff_cell
+
+    ff_cell*= (cnfg.no_rotate == False)
+    ff_edge*= (cnfg.no_rotate == False)
+    ff_dual*= (cnfg.no_rotate == False)
 
     zb_cell = flow.zb_cell
 
@@ -80,6 +122,8 @@ def upwinding(mesh, trsk, cnfg,
               up_kind, up_min_, up_max_):
 
     ttic = time.time()
+
+    sv_bias = np.zeros(mesh.edge.size, dtype=float)
 
     if (up_kind == "LUST"):
 
@@ -547,5 +591,30 @@ def computeVU(mesh, trsk, cnfg, uu_edge):
     tcpu.computeVU = tcpu.computeVU + (ttoc - ttic)
 
     return v2_edge - v4_edge
+
+
+def computeMS(mesh, trsk, cnfg, 
+              hh_cell, uu_edge, ht_cell, ut_edge):
+
+    hh_dual, \
+    hh_edge = compute_H(mesh, trsk, cnfg, hh_cell, uu_edge)
+
+#-- 1/2 * h * grad(div(du/dt * h))
+    uh_edge = ut_edge * hh_edge
+
+    uh_cell = trsk.cell_flux_sums * uh_edge
+    uh_cell/= mesh.cell.area
+
+    d1_edge = trsk.edge_grad_norm * uh_cell
+    d1_edge*= hh_edge / 2.0
+
+#-- 1/6 * h^2 * grad(div(du/dt)) 
+    ut_cell = trsk.cell_flux_sums * ut_edge
+    ut_cell/= mesh.cell.area
+
+    d2_edge = trsk.edge_grad_norm * ut_cell
+    d2_edge*= hh_edge ** 2 / 6.0
+
+    return d1_edge - d2_edge
 
 

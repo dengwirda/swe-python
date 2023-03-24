@@ -9,13 +9,13 @@ from msh import load_mesh, load_flow
 from ops import trsk_mats
 
 from _dx import HH_TINY, UU_TINY
-from _dx import invariant, tcpu
-from _dt import step_RK22, step_RK32, step_SP33, step_RK4
+from _dx import invariant, diag_vars, tcpu
+from _dt import step_RK22, step_RK32, step_SP33, step_RK44
 
 def strtobool(val):
     """
     Silly re-implementation of strtobool, since python has
-    been deprecating these things...
+    deprecated these things...
 
     """
     val = val.lower()
@@ -32,33 +32,27 @@ def swe(cnfg):
     SWE: solve the nonlinear SWE on generalised MPAS meshes.
 
     """
-    # Authors: Darren Engwirda
+    # Authors:  Darren Engwirda, 
+    #           Jeremy Lilly, 
+    #           Sara Calandrini
 
     cnfg.stat_freq = np.minimum(
         cnfg.save_freq, cnfg.stat_freq)
     
     cnfg.integrate = cnfg.integrate.upper()
     cnfg.operators = cnfg.operators.upper()
+    cnfg.equations = cnfg.equations.upper()
     cnfg.ke_upwind = cnfg.ke_upwind.upper()
     cnfg.ke_scheme = cnfg.ke_scheme.upper()
     cnfg.pv_upwind = cnfg.pv_upwind.upper()
     cnfg.pv_scheme = cnfg.pv_scheme.upper()
-
+    
     cnfg.du_damp_4 = np.sqrt(cnfg.du_damp_4)
     cnfg.vu_damp_4 = np.sqrt(cnfg.vu_damp_4)
 
     name = cnfg.mpas_file
     path, file = os.path.split(name)
     save = os.path.join(path, "out_" + file)
-
-    if cnfg.fb_weight:
-        nweights = len(cnfg.fb_weight)
-        if ("RK22" in cnfg.integrate) and (nweights != 2):
-            raise Exception("RK22 requires 2 FB-weights, " +
-                            "{} provided".format(nweights))
-        elif ("RK32" in cnfg.integrate) and (nweights != 3):
-            raise Exception("RK32 requires 3 FB-weights, " +
-                            "{} provided".format(nweights))
 
     print("Loading input assets...")
     
@@ -72,8 +66,11 @@ def swe(cnfg):
 
     u0_edge = flow.uu_edge[-1, :, 0]
     uu_edge = u0_edge
+    ut_edge = u0_edge * 0.0
+    
     h0_cell = flow.hh_cell[-1, :, 0]
     hh_cell = h0_cell
+    ht_cell = h0_cell * 0.0
 
     hh_cell = np.maximum(HH_TINY, hh_cell)
 
@@ -100,39 +97,37 @@ def swe(cnfg):
 
     ttic = time.time(); xout = []; next = 0; freq = 0
 
-    for step in range(cnfg.iteration + 1):
+    for step in range(0, cnfg.iteration + 1):
 
-        if ("RK22" in cnfg.integrate):
+        if (step > 0):
+        #-- 0-th step is just to write ICs to output...
+            if ("RK22" in cnfg.integrate):
 
-            hh_cell, uu_edge, ke_cell, ke_dual, \
-            rv_cell, pv_cell, \
-            rv_dual, pv_dual, \
-            ke_bias, pv_bias = step_RK22(
-                mesh, trsk, flow, cnfg, hh_cell, uu_edge)
+                hh_cell, uu_edge, \
+                ht_cell, ut_edge = step_RK22(
+                    mesh, trsk, flow, cnfg, 
+                    hh_cell, uu_edge, ht_cell, ut_edge)
 
-        if ("RK32" in cnfg.integrate):
+            if ("RK32" in cnfg.integrate):
 
-            hh_cell, uu_edge, ke_cell, ke_dual, \
-            rv_cell, pv_cell, \
-            rv_dual, pv_dual, \
-            ke_bias, pv_bias = step_RK32(
-                mesh, trsk, flow, cnfg, hh_cell, uu_edge)
+                hh_cell, uu_edge, \
+                ht_cell, ut_edge = step_RK32(
+                    mesh, trsk, flow, cnfg, 
+                    hh_cell, uu_edge, ht_cell, ut_edge)
 
-        if ("SP33" in cnfg.integrate):
+            if ("SP33" in cnfg.integrate):
 
-            hh_cell, uu_edge, ke_cell, ke_dual, \
-            rv_cell, pv_cell, \
-            rv_dual, pv_dual, \
-            ke_bias, pv_bias = step_SP33(
-                mesh, trsk, flow, cnfg, hh_cell, uu_edge)
-        
-        if ("RK4" in cnfg.integrate):
+                hh_cell, uu_edge, \
+                ht_cell, ut_edge = step_SP33(
+                    mesh, trsk, flow, cnfg, 
+                    hh_cell, uu_edge, ht_cell, ut_edge)
 
-            hh_cell, uu_edge, ke_cell, ke_dual, \
-            rv_cell, pv_cell, \
-            rv_dual, pv_dual, \
-            ke_bias, pv_bias = step_RK4(
-                mesh, trsk, flow, cnfg, hh_cell, uu_edge)
+            if ("RK44" in cnfg.integrate):
+
+                hh_cell, uu_edge, \
+                ht_cell, ut_edge = step_RK44(
+                    mesh, trsk, flow, cnfg, 
+                    hh_cell, uu_edge, ht_cell, ut_edge)
 
         if (step % cnfg.stat_freq == 0):
 
@@ -149,6 +144,12 @@ def swe(cnfg):
             next = next + 1
 
         if (step % cnfg.save_freq == 0):
+
+            ke_cell, ke_dual, \
+            rv_cell, pv_cell, \
+            rv_dual, pv_dual, \
+            ke_bias, pv_bias = diag_vars(
+                mesh, trsk, flow, cnfg, hh_cell, uu_edge)
 
             data = nc.Dataset(
                 save, "a", format="NETCDF3_64BIT_OFFSET")
@@ -447,7 +448,14 @@ if (__name__ == "__main__"):
         "--integrate", dest="integrate", type=str,
         default="RK32-FB",
         required=False, 
-        help="Time integration = {RK32-FB}, RK22-FB.")
+        help="Time integration = {RK32-FB}, RK22-FB, SP33, RK44.")
+
+    parser.add_argument(
+        "--equations", dest="equations", type=str,
+        default="shallow-water",
+        required=False,
+        help="Eqn. selection = " + 
+             "{shallow-water}, madsen-sorensen.")
 
     parser.add_argument(
         "--pv-upwind", dest="pv_upwind", type=str,
@@ -498,21 +506,21 @@ if (__name__ == "__main__"):
         default="CENTRE",
         required=False, 
         help="KE.-grad formulation = {CENTRE}, " +
-                                     "CENTRE+SKINNY," +
+                                     "CENTRE+SKINNY, " +
                                      "UPWIND, " + 
                                      "UPWIND+SKINNY.")
 
     parser.add_argument(
         "--du-damp-2", dest="du_damp_2", type=float,
-        default=1.E+00,
+        default=0.E+00,
         required=False,
-        help="DIV^2 damping coeff. {DAMP = +1.E+00}.")
+        help="DIV^2 damping coeff. {DAMP = +0.E+00}.")
 
     parser.add_argument(
         "--du-damp-4", dest="du_damp_4", type=float,
-        default=1.E+00,
+        default=0.E+00,
         required=False,
-        help="DIV^4 damping coeff. {DAMP = +1.E+00}.")
+        help="DIV^4 damping coeff. {DAMP = +0.E+00}.")
 
     parser.add_argument(
         "--vu-damp-2", dest="vu_damp_2", type=float,
@@ -556,9 +564,8 @@ if (__name__ == "__main__"):
     parser.add_argument(
         "--FB-weight", dest="fb_weight", type=float,
         required=False,
-        nargs='*',
+        nargs="*",
         help="Forward-backward weights for integrators.")
-
 
     swe(parser.parse_args())
 
