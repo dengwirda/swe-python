@@ -5,6 +5,14 @@ import numpy as np
 import netCDF4 as nc
 import argparse
 
+""" SWE: solve the nonlinear SWE on generalised MPAS meshes.
+"""
+#-- Authors: Darren Engwirda, 
+#--          Jeremy Lilly, 
+#--          Sara Calandrini
+
+from stb import strtobool
+
 from msh import load_mesh, load_flow
 from ops import trsk_mats
 
@@ -12,31 +20,10 @@ from _dx import HH_TINY, UU_TINY
 from _dx import invariant, diag_vars, tcpu
 from _dt import step_eqns
 
-def strtobool(val):
-    """
-    Silly re-implementation of strtobool, since python has
-    deprecated these things...
-
-    """
-    val = val.lower()
-    if val in ('y', 'yes', 't', 'true', 'on', '1'):
-        return 1
-    elif val in ('n', 'no', 'f', 'false', 'off', '0'):
-        return 0
-    else:
-        raise ValueError("Invalid bool value %r" % (val,))
-
-
 def swe(cnfg):
-    """
-    SWE: solve the nonlinear SWE on generalised MPAS meshes.
 
-    """
-    # Authors:  Darren Engwirda,
-    #           Jeremy Lilly, 
-    #           Sara Calandrini
-    # Contact:  dengwirda@lanl.gov
-
+    cnfg.save_freq = np.minimum(
+        cnfg.iteration, cnfg.save_freq)
     cnfg.stat_freq = np.minimum(
         cnfg.save_freq, cnfg.stat_freq)
     
@@ -57,11 +44,18 @@ def swe(cnfg):
 
     print("Loading input assets...")
     
+    ttic = time.time()
+
     # load mesh + init. conditions
     mesh = load_mesh(name, sort=True)
     flow = load_flow(name, mesh=mesh)
 
+    ttoc = time.time()
+   #print(ttoc - ttic)
+
     print("Creating output file...")
+
+    ttic = time.time()
 
     init_file(name, cnfg, save)
 
@@ -75,7 +69,12 @@ def swe(cnfg):
 
     hh_cell = np.maximum(HH_TINY, hh_cell)
 
+    ttoc = time.time()
+   #print(ttoc - ttic)
+
     print("Forming coefficients...")
+
+    ttic = time.time()
 
     # set sparse spatial operators
     trsk = trsk_mats(mesh)
@@ -89,10 +88,17 @@ def swe(cnfg):
     flow.ff_cell = \
         (flow.ff_cell / mesh.cell.area)
 
+    flow.ff_cell*= (not cnfg.no_rotate)
+    flow.ff_edge*= (not cnfg.no_rotate)
+    flow.ff_vert*= (not cnfg.no_rotate)
+
     kp_sums = np.zeros((
         cnfg.iteration // cnfg.stat_freq + 1), dtype=float)
     en_sums = np.zeros((
         cnfg.iteration // cnfg.stat_freq + 1), dtype=float)
+
+    ttoc = time.time()
+   #print(ttoc - ttic)
 
     print("Integrating:")
 
@@ -130,7 +136,7 @@ def swe(cnfg):
                 mesh, trsk, flow, cnfg, hh_cell, uu_edge)
 
             data = nc.Dataset(
-                save, "a", format="NETCDF3_64BIT_OFFSET")
+                save, "a", format="NETCDF4")
 
             data.variables["uu_edge"][freq, :, :] = \
                 np.reshape(uu_edge[
@@ -186,6 +192,7 @@ def swe(cnfg):
                 np.reshape(up_dual[
                     mesh.vert.irev - 1], (1, mesh.vert.size, 1))
             
+            """
             ui_cell = trsk.cell_lsqr_xnrm * uu_edge
             ux_dual = trsk.dual_kite_sums * ui_cell
             ux_dual = ux_dual / mesh.vert.area
@@ -207,6 +214,7 @@ def swe(cnfg):
             data.variables["uz_dual"][freq, :, :] = \
                 np.reshape(uz_dual[
                     mesh.vert.irev - 1], (1, mesh.vert.size, 1))
+            """
 
             data.close()
 
@@ -226,8 +234,7 @@ def swe(cnfg):
     print("tcpu.computeVU:", tcpu.computeVU)
     print("tcpu.computeCd:", tcpu.computeCd)
 
-    data = nc.Dataset(
-        save, "a", format="NETCDF3_64BIT_OFFSET")
+    data = nc.Dataset(save, "a", format="NETCDF4")
 
     data.variables["kp_sums"][:] = kp_sums
     data.variables["en_sums"][:] = en_sums
@@ -239,8 +246,7 @@ def init_file(name, cnfg, save):
     mesh = load_mesh(name)  # so that there's no reindexing
     flow = load_flow(name)
 
-    data = nc.Dataset(
-        save, "w", format="NETCDF3_64BIT_OFFSET")
+    data = nc.Dataset(save, "w", format="NETCDF4")
     data.on_a_sphere = "YES"
     data.sphere_radius = mesh.rsph
     data.is_periodic = "NO"
@@ -348,11 +354,11 @@ def init_file(name, cnfg, save):
     data.createVariable(
         "u0_edge", "f8", ("nEdges", "nVertLevels"))
     data["u0_edge"].long_name = "Normal velocity initial conditions" 
-    data["u0_edge"][:] = flow.uu_edge   
+    data["u0_edge"][:] = flow.uu_edge[-1, :, :]
     data.createVariable(
         "h0_cell", "f8", ("nCells", "nVertLevels"))    
     data["h0_cell"].long_name = "Layer thickness initial conditions"
-    data["h0_cell"][:] = flow.hh_cell
+    data["h0_cell"][:] = flow.hh_cell[-1, :, :]
 
     data.createVariable(
         "uu_edge", "f8", ("Time", "nEdges", "nVertLevels"))
@@ -398,6 +404,7 @@ def init_file(name, cnfg, save):
     data["pv_bias"].long_name = \
         "Upwind-bias for PV, averaged to duals"
 
+    """
     data.createVariable(
         "ux_dual", "f4", ("Time", "nVertices", "nVertLevels"))
     data["ux_dual"].long_name = "x-component of velocity"
@@ -407,6 +414,7 @@ def init_file(name, cnfg, save):
     data.createVariable(
         "uz_dual", "f4", ("Time", "nVertices", "nVertLevels"))
     data["uz_dual"].long_name = "z-component of velocity"
+    """
 
     data.createVariable("kp_sums", "f8", ("Step"))
     data["kp_sums"].long_name = \
@@ -439,7 +447,14 @@ if (__name__ == "__main__"):
         "--integrate", dest="integrate", type=str,
         default="RK32-FB",
         required=False, 
-        help="Time integration = {RK32-FB}, RK22-FB, SP33, RK44.")
+        help="Time integration = " +
+             "{RK32-FB}, RK22-FB, SF32-FB,  SP33, RK44.")
+
+    parser.add_argument(
+        "--sub-steps", dest="sub_steps", type=int,
+        default=1,
+        required=False, help="Number of fast steps; " + 
+                            "for slow-fast integrators.")
 
     parser.add_argument(
         "--equations", dest="equations", type=str,
@@ -457,15 +472,15 @@ if (__name__ == "__main__"):
 
     parser.add_argument(
         "--pv-min-up", dest="pv_min_up", type=float,
-        default=1./30.,
+        default=1./40.,
         required=False,
-        help="Upwind PV.-flux bias {BIAS = +1./30.}.")
+        help="Upwind PV.-flux bias {BIAS = +1./40.}.")
 
     parser.add_argument(
         "--pv-max-up", dest="pv_max_up", type=float,
-        default=4./ 9.,
+        default=1./ 2.,
         required=False,
-        help="Upwind PV.-flux bias {BIAS = +4./ 9.}.")
+        help="Upwind PV.-flux bias {BIAS = +1./ 2.}.")
     
     parser.add_argument(
         "--pv-scheme", dest="pv_scheme", type=str,
@@ -482,15 +497,15 @@ if (__name__ == "__main__"):
 
     parser.add_argument(
         "--ke-min-up", dest="ke_min_up", type=float,
-        default=1./90.,
+        default=1./80.,
         required=False,
-        help="Upwind KE.-edge bias {BIAS = +1./90.}.")
+        help="Upwind KE.-edge bias {BIAS = +1./80.}.")
 
     parser.add_argument(
         "--ke-max-up", dest="ke_max_up", type=float,
-        default=1./15.,
+        default=1./10.,
         required=False,
-        help="Upwind KE.-edge bias {BIAS = +1./15.}.")
+        help="Upwind KE.-edge bias {BIAS = +1./10.}.")
 
     parser.add_argument(
         "--ke-scheme", dest="ke_scheme", type=str,
@@ -551,12 +566,15 @@ if (__name__ == "__main__"):
 
     parser.add_argument(
         "--save-freq", dest="save_freq", type=int,
-        required=True, help="Save each FREQ-th step.")
+        required=False, 
+        default=np.iinfo(int).max, 
+        help="Save output to file at each FREQ-th step.")
 
     parser.add_argument(
         "--stat-freq", dest="stat_freq", type=int,
         required=False, 
-        default=10000, help="Prints at FREQ-th step.")
+        default=np.iinfo(int).max, 
+        help="Evaluate statistics at each FREQ-th step.")
 
     parser.add_argument(
         "--no-advect", dest="no_advect", 

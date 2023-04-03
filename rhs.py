@@ -37,10 +37,6 @@ def rhs_slw_u(mesh, trsk, flow, cnfg,
     ff_edge = flow.ff_edge
     ff_dual = flow.ff_vert
 
-    ff_cell*= (cnfg.no_rotate == False)
-    ff_edge*= (cnfg.no_rotate == False)
-    ff_dual*= (cnfg.no_rotate == False)
-
     zb_cell = flow.zb_cell
 
     dw_edge = 0.0
@@ -59,7 +55,7 @@ def rhs_slw_u(mesh, trsk, flow, cnfg,
         +1.0 / 2.0 * cnfg.time_step)
 
     ke_grad = trsk.edge_grad_norm * ke_cell
-    ke_grad*= (cnfg.no_advect == False)
+    if(cnfg.no_advect): ke_grad *= 0.
 
     rv_dual, pv_dual, rv_cell, pv_cell, \
     pv_edge, pv_bias = computePV(
@@ -116,6 +112,5 @@ def rhs_all_u(mesh, trsk, flow, cnfg,
         ke_cell, ke_dual, ke_bias, \
         rv_cell, pv_cell, \
         rv_dual, pv_dual, pv_bias
-
 
 

@@ -101,7 +101,7 @@ def ltc1(name, save, rsph, mesh, trsk, xmid, ymid):
 
     print(init)
 
-    init.to_netcdf(save, format="NETCDF3_64BIT_OFFSET")
+    init.to_netcdf(save, format="NETCDF4")
 
     return
 
@@ -126,13 +126,14 @@ def ltc2(name, save, rsph, mesh, trsk, xmid, ymid):
     zb_cell+= np.asarray(
         data["ice_thickness"][:], dtype=np.float64)
 
-    zb_cell = np.minimum(-10., zb_cell)  # not too shallow
+    zb_cell = np.minimum(-5.0, zb_cell)  # not too shallow
 
     uu_edge = np.zeros(mesh.edge.size, dtype=np.float64)
 
-    hh_cell = -zb_cell + 5.0 * np.exp(
-            - 250. * (mesh.cell.xlon - xmid) ** 2 + \
-            - 250. * (mesh.cell.ylat - ymid) ** 2 )
+    hh_cell = -zb_cell + 5.0 * np.exp( -1.0 * (
+            250. * (mesh.cell.xlon - xmid) ** 2 + \
+            250. * (mesh.cell.ylat - ymid) ** 2
+            ) ** 4 )
 
 #-- inject mesh with IC.'s and write output MPAS netCDF file
 
@@ -181,7 +182,7 @@ def ltc2(name, save, rsph, mesh, trsk, xmid, ymid):
 
     print(init)
 
-    init.to_netcdf(save, format="NETCDF3_64BIT_OFFSET")
+    init.to_netcdf(save, format="NETCDF4")
 
     return
 

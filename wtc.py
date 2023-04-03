@@ -13,7 +13,7 @@ from ops import trsk_mats
 # SWE test cases due to Williamson et al
 # Authors: Darren Engwirda
 
-def init(name, save, rsph, case):
+def init(name, save, rsph, case, xmid, ymid):
 
 #-- Williamson, D. L., et al. (1992) A Standard Test Set for
 #-- Numerical Approximations to the Shallow Water Equations
@@ -33,25 +33,28 @@ def init(name, save, rsph, case):
 
 #------------------------------------ compute test-case IC's
 
+    xmid = xmid * np.pi / 180.0
+    ymid = ymid * np.pi / 180.0
+
     if (case == 2): 
-        wtc2(name, save, rsph, mesh, trsk)
+        wtc2(name, save, rsph, mesh, trsk, xmid, ymid)
 
     if (case == 22): 
-        wtcb(name, save, rsph, mesh, trsk)
+        wtcb(name, save, rsph, mesh, trsk, xmid, ymid)
 
     if (case == 222): 
-        wtcc(name, save, rsph, mesh, trsk)
+        wtcc(name, save, rsph, mesh, trsk, xmid, ymid)
     
     if (case == 4): 
-        wtc4(name, save, rsph, mesh, trsk)
+        wtc4(name, save, rsph, mesh, trsk, xmid, ymid)
 
     if (case == 5): 
-        wtc5(name, save, rsph, mesh, trsk)
+        wtc5(name, save, rsph, mesh, trsk, xmid, ymid)
 
     return
 
 
-def wtc2(name, save, rsph, mesh, trsk):
+def wtc2(name, save, rsph, mesh, trsk, xmid, ymid):
 
 #-- build a stream-function, velocity field + thickness IC's
 
@@ -129,12 +132,12 @@ def wtc2(name, save, rsph, mesh, trsk):
 
     print(init)
 
-    init.to_netcdf(save, format="NETCDF3_64BIT_OFFSET")
+    init.to_netcdf(save, format="NETCDF4")
 
     return
 
 
-def wtcb(name, save, rsph, mesh, trsk):
+def wtcb(name, save, rsph, mesh, trsk, xmid, ymid):
 
 #-- build a stream-function, velocity field + thickness IC's
 #-- TC2 "thin", as per Peixoto
@@ -213,12 +216,12 @@ def wtcb(name, save, rsph, mesh, trsk):
 
     print(init)
 
-    init.to_netcdf(save, format="NETCDF3_64BIT_OFFSET")
+    init.to_netcdf(save, format="NETCDF4")
 
     return
 
 
-def wtcc(name, save, rsph, mesh, trsk):
+def wtcc(name, save, rsph, mesh, trsk, xmid, ymid):
 
 #-- build a stream-function, velocity field + thickness IC's
 #-- TC2 "thin", as per Peixoto, but with -ve "bump" to build
@@ -316,12 +319,12 @@ def wtcc(name, save, rsph, mesh, trsk):
 
     print(init)
 
-    init.to_netcdf(save, format="NETCDF3_64BIT_OFFSET")
+    init.to_netcdf(save, format="NETCDF4")
 
     return
 
 
-def ufn4(alat, umag, rsph):
+def ufn4(alat, umag, rsph, xmid, ymid):
     
     ubar = umag * (2.0 * np.sin(alat) * np.cos(alat)) ** 14
 
@@ -539,23 +542,23 @@ def wtc4(name, save, rsph, mesh, trsk):
 
     print(init)
 
-    init.to_netcdf(save, format="NETCDF3_64BIT_OFFSET")
+    init.to_netcdf(save, format="NETCDF4")
 
     return
 
 
-def wtc5(name, save, rsph, mesh, trsk):
+def wtc5(name, save, rsph, mesh, trsk, xmid, ymid):
 
 #-- build a stream-function, velocity field + thickness IC's
 
     erot = 7.292E-05            # Earth's omega
     grav = 9.80616              # gravity
 
-    umag = 20.0
+    umag = 20.0                 # m/s flow
     g_h0 = 5960.0 * grav
 
-    xmid = 3.0 * np.pi / 2.0
-    ymid = 1.0 * np.pi / 6.0
+   #xmid = 3.0 * np.pi / 2.0
+   #ymid = 1.0 * np.pi / 6.0
     rrad = 1.0 * np.pi / 9.0
     hs_0 = 2000.0
 
@@ -639,7 +642,7 @@ def wtc5(name, save, rsph, mesh, trsk):
 
     print(init)
 
-    init.to_netcdf(save, format="NETCDF3_64BIT_OFFSET")
+    init.to_netcdf(save, format="NETCDF4")
 
     return
 
@@ -663,11 +666,25 @@ if (__name__ == "__main__"):
 
     parser.add_argument(
         "--radius", dest="radius", type=float,
-        required=True, help="Value of sphere_radius.")
+        required=True, help="Value of sphere_radius [m].")
+
+    parser.add_argument(
+        "--case-xmid", dest="case_xmid", type=float,
+        default=+270.,
+        required=False, 
+        help="Test-case offset in lon. direction [deg].")
+
+    parser.add_argument(
+        "--case-ymid", dest="case_ymid", type=float,
+        default=+30.0,
+        required=False, 
+        help="Test-case offset in lat. direction [deg].")
 
     args = parser.parse_args()
 
     init(name=args.mesh_file,
          save=args.init_file,
          rsph=args.radius,
-         case=args.test_case)
+         case=args.test_case,
+         xmid=args.case_xmid,
+         ymid=args.case_ymid)
