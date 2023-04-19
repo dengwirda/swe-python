@@ -227,8 +227,7 @@ def step_RK32(mesh, trsk, flow, cnfg,
     if cnfg.fb_weight:
         BETA = cnfg.fb_weight[0]
     else:
-       #BETA = 0.333333333333333
-        BETA = 0.387500000000000
+        BETA = 0.311875000000000
 
     BETA *= ("FB" in cnfg.integrate)
 
@@ -272,8 +271,7 @@ def step_RK32(mesh, trsk, flow, cnfg,
     if cnfg.fb_weight:
         BETA = cnfg.fb_weight[1]
     else:
-       #BETA = 0.500000000000000
-        BETA = 0.450000000000000
+        BETA = 0.425000000000000
 
     BETA *= ("FB" in cnfg.integrate)
 
@@ -325,9 +323,7 @@ def step_RK32(mesh, trsk, flow, cnfg,
     if cnfg.fb_weight:
         BETA = cnfg.fb_weight[2]
     else:
-       #BETA = 0.291666666666667
-       #BETA = 0.296666666666667
-        BETA = 0.345000000000000
+        BETA = 0.362500000000000
 
     BETA *= ("FB" in cnfg.integrate)
 
@@ -529,8 +525,7 @@ def fast_RK32(mesh, trsk, flow, cnfg,
     if cnfg.fb_weight:
         BETA = cnfg.fb_weight[0]
     else:
-       #BETA = 0.333333333333333
-        BETA = 0.387500000000000
+        BETA = 0.311875000000000
 
     BETA *= ("FB" in cnfg.integrate)
 
@@ -570,8 +565,7 @@ def fast_RK32(mesh, trsk, flow, cnfg,
     if cnfg.fb_weight:
         BETA = cnfg.fb_weight[1]
     else:
-       #BETA = 0.500000000000000
-        BETA = 0.450000000000000
+        BETA = 0.425000000000000
 
     BETA *= ("FB" in cnfg.integrate)
 
@@ -619,9 +613,7 @@ def fast_RK32(mesh, trsk, flow, cnfg,
     if cnfg.fb_weight:
         BETA = cnfg.fb_weight[2]
     else:
-       #BETA = 0.291666666666667
-       #BETA = 0.296666666666667
-        BETA = 0.345000000000000
+        BETA = 0.362500000000000
 
     BETA *= ("FB" in cnfg.integrate)
 

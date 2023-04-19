@@ -5,9 +5,10 @@ import numpy as np
 """
 #-- Darren Engwirda
 
-from _dx import invariant, upwinding, tcpu, \
+from _dx import tcpu, \
                 compute_H, computePV, \
                 computeKE, advect_PV, \
+                computeVV, \
                 computeDU, computeVU, \
                 computeMS
 
@@ -20,6 +21,8 @@ def rhs_fst_h(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     uh_cell = trsk.cell_flux_sums * uh_edge
     uh_cell/= mesh.cell.area
+    
+    if (cnfg.no_h_tend): uh_cell *= 0.
 
     return uh_cell
 
@@ -41,7 +44,7 @@ def rhs_slw_u(mesh, trsk, flow, cnfg,
 
     dw_edge = 0.0
 
-    vv_edge = trsk.edge_lsqr_perp * uu_edge
+    vv_edge = computeVV(mesh, trsk, cnfg, uu_edge)
 
     hh_dual, \
     hh_edge = compute_H(mesh, trsk, cnfg, hh_cell, uu_edge)
@@ -68,13 +71,21 @@ def rhs_slw_u(mesh, trsk, flow, cnfg,
     qh_flux = advect_PV(mesh, trsk, cnfg, uh_edge, pv_edge)
 
     uu_damp = computeDU(mesh, trsk, cnfg, uu_edge)
+    
+    uu_damp+= computeVU(mesh, trsk, cnfg, uu_edge)
 
     if (cnfg.equations in "MADSEN-SORENSEN"):
         dw_edge = computeMS(
             mesh, trsk, cnfg, 
                 hh_cell, uu_edge, ht_cell, ut_edge)
+                
+    ru_edge = (
+        ke_grad + qh_flux - uu_damp - dw_edge
+    )
+                
+    if (cnfg.no_u_tend): ru_edge *= 0.
     
-    return ke_grad + qh_flux - uu_damp - dw_edge, \
+    return ru_edge, \
         ke_cell, ke_dual, ke_bias, \
         rv_cell, pv_cell, \
         rv_dual, pv_dual, pv_bias
@@ -86,11 +97,13 @@ def rhs_fst_u(mesh, trsk, flow, cnfg,
 
     zb_cell = flow.zb_cell
 
-    hk_cell = (hh_cell + zb_cell) * flow.grav
+    hz_cell = (hh_cell + zb_cell) * flow.grav
     
-    hk_grad = trsk.edge_grad_norm * hk_cell
+    hz_grad = trsk.edge_grad_norm * hz_cell
     
-    return hk_grad
+    if (cnfg.no_u_tend): hz_grad *= 0.
+    
+    return hz_grad
 
 
 def rhs_all_u(mesh, trsk, flow, cnfg, 

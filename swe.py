@@ -13,7 +13,8 @@ import argparse
 
 from stb import strtobool
 
-from msh import load_mesh, load_flow
+from msh import load_mesh, load_flow, \
+                sort_mesh, sort_flow
 from ops import trsk_mats
 
 from _dx import HH_TINY, UU_TINY
@@ -47,8 +48,8 @@ def swe(cnfg):
     ttic = time.time()
 
     # load mesh + init. conditions
-    mesh = load_mesh(name, sort=True)
-    flow = load_flow(name, mesh=mesh)
+    mesh = load_mesh(name)
+    flow = load_flow(name, None, lean=True)
 
     ttoc = time.time()
    #print(ttoc - ttic)
@@ -57,7 +58,17 @@ def swe(cnfg):
 
     ttic = time.time()
 
-    init_file(name, cnfg, save)
+    init_file(name, cnfg, save, mesh, flow)
+
+    ttoc = time.time()
+   #print(ttoc - ttic)
+
+    print("Reordering mesh data...")
+
+    ttic = time.time()
+
+    mesh = sort_mesh(mesh, True)
+    flow = sort_flow(flow, mesh, lean=True)
 
     u0_edge = flow.uu_edge[-1, :, 0]
     uu_edge = u0_edge
@@ -158,26 +169,13 @@ def swe(cnfg):
                 np.reshape(du_cell[
                     mesh.cell.irev - 1], (1, mesh.cell.size, 1))
 
-            data.variables["ke_cell"][freq, :, :] = \
-                np.reshape(ke_cell[
-                    mesh.cell.irev - 1], (1, mesh.cell.size, 1))
-            data.variables["ke_dual"][freq, :, :] = \
-                np.reshape(ke_dual[
-                    mesh.vert.irev - 1], (1, mesh.vert.size, 1))            
+            up_dual = trsk.dual_stub_sums * ke_bias
+            up_dual = up_dual / mesh.vert.area
 
-            data.variables["pv_cell"][freq, :, :] = \
-                np.reshape(pv_cell[
-                    mesh.cell.irev - 1], (1, mesh.cell.size, 1))
-            data.variables["rv_cell"][freq, :, :] = \
-                np.reshape(rv_cell[
-                    mesh.cell.irev - 1], (1, mesh.cell.size, 1))
-            data.variables["pv_dual"][freq, :, :] = \
-                np.reshape(pv_dual[
+            data.variables["ke_bias"][freq, :, :] = \
+                np.reshape(up_dual[
                     mesh.vert.irev - 1], (1, mesh.vert.size, 1))
-            data.variables["rv_dual"][freq, :, :] = \
-                np.reshape(rv_dual[
-                    mesh.vert.irev - 1], (1, mesh.vert.size, 1))
-            
+
             up_dual = trsk.dual_stub_sums * pv_bias
             up_dual = up_dual / mesh.vert.area
 
@@ -185,14 +183,27 @@ def swe(cnfg):
                 np.reshape(up_dual[
                     mesh.vert.irev - 1], (1, mesh.vert.size, 1))
 
-            up_dual = trsk.dual_stub_sums * ke_bias
-            up_dual = up_dual / mesh.vert.area
-
-            data.variables["ke_bias"][freq, :, :] = \
-                np.reshape(up_dual[
+            data.variables["ke_cell"][freq, :, :] = \
+                np.reshape(ke_cell[
+                    mesh.cell.irev - 1], (1, mesh.cell.size, 1))        
+            data.variables["pv_dual"][freq, :, :] = \
+                np.reshape(pv_dual[
+                    mesh.vert.irev - 1], (1, mesh.vert.size, 1))
+            data.variables["rv_dual"][freq, :, :] = \
+                np.reshape(rv_dual[
                     mesh.vert.irev - 1], (1, mesh.vert.size, 1))
             
             """
+            data.variables["ke_dual"][freq, :, :] = \
+                np.reshape(ke_dual[
+                    mesh.vert.irev - 1], (1, mesh.vert.size, 1))
+            data.variables["pv_cell"][freq, :, :] = \
+                np.reshape(pv_cell[
+                    mesh.cell.irev - 1], (1, mesh.cell.size, 1))
+            data.variables["rv_cell"][freq, :, :] = \
+                np.reshape(rv_cell[
+                    mesh.cell.irev - 1], (1, mesh.cell.size, 1))
+            
             ui_cell = trsk.cell_lsqr_xnrm * uu_edge
             ux_dual = trsk.dual_kite_sums * ui_cell
             ux_dual = ux_dual / mesh.vert.area
@@ -222,7 +233,7 @@ def swe(cnfg):
 
     ttoc = time.time()
 
-    print("Total run time:", ttoc - ttic)
+    print("Total run-time:", ttoc - ttic)
     print("tcpu.thickness:", tcpu.thickness)
     print("tcpu.momentum_:", tcpu.momentum_)
     print("tcpu.upwinding:", tcpu.upwinding) 
@@ -230,6 +241,7 @@ def swe(cnfg):
     print("tcpu.computeKE:", tcpu.computeKE)    
     print("tcpu.computePV:", tcpu.computePV)
     print("tcpu.advect_PV:", tcpu.advect_PV)
+    print("tcpu.computeVV:", tcpu.computeVV)
     print("tcpu.computeDU:", tcpu.computeDU)
     print("tcpu.computeVU:", tcpu.computeVU)
     print("tcpu.computeCd:", tcpu.computeCd)
@@ -241,10 +253,7 @@ def swe(cnfg):
     data.close()
 
 
-def init_file(name, cnfg, save):
-
-    mesh = load_mesh(name)  # so that there's no reindexing
-    flow = load_flow(name)
+def init_file(name, cnfg, save, mesh, flow):
 
     data = nc.Dataset(save, "w", format="NETCDF4")
     data.on_a_sphere = "YES"
@@ -360,6 +369,13 @@ def init_file(name, cnfg, save):
     data["h0_cell"].long_name = "Layer thickness initial conditions"
     data["h0_cell"][:] = flow.hh_cell[-1, :, :]
 
+    data.createVariable("kp_sums", "f8", ("Step"))
+    data["kp_sums"].long_name = \
+        "Energetics invariant: total KE+PE over time"
+    data.createVariable("en_sums", "f8", ("Step"))
+    data["en_sums"].long_name = \
+        "Rotational invariant: total PV**2 over time"
+
     data.createVariable(
         "uu_edge", "f8", ("Time", "nEdges", "nVertLevels"))
     data["uu_edge"].long_name = "Normal velocity on edges"    
@@ -377,34 +393,35 @@ def init_file(name, cnfg, save):
         "Divergence of velocity on cells"
 
     data.createVariable(
-        "ke_cell", "f4", ("Time", "nCells", "nVertLevels"))
-    data["ke_cell"].long_name = "Kinetic energy on cells"
-    data.createVariable(
-        "ke_dual", "f4", ("Time", "nVertices", "nVertLevels"))
-    data["ke_dual"].long_name = "Kinetic energy on duals"    
-    data.createVariable(
         "ke_bias", "f4", ("Time", "nVertices", "nVertLevels"))
     data["ke_bias"].long_name = \
         "Upwind-bias for KE, averaged to duals"
-   
     data.createVariable(
-        "pv_cell", "f4", ("Time", "nCells", "nVertLevels"))
-    data["pv_cell"].long_name = "Potential vorticity on cells"
+        "pv_bias", "f4", ("Time", "nVertices", "nVertLevels"))
+    data["pv_bias"].long_name = \
+        "Upwind-bias for PV, averaged to duals"
+
     data.createVariable(
-        "rv_cell", "f4", ("Time", "nCells", "nVertLevels"))
-    data["rv_cell"].long_name = "Relative vorticity on cells"
+        "ke_cell", "f4", ("Time", "nCells", "nVertLevels"))
+    data["ke_cell"].long_name = "Kinetic energy on cells"
     data.createVariable(
         "pv_dual", "f4", ("Time", "nVertices", "nVertLevels"))
     data["pv_dual"].long_name = "Potential vorticity on duals"
     data.createVariable(
         "rv_dual", "f4", ("Time", "nVertices", "nVertLevels"))
     data["rv_dual"].long_name = "Relative vorticity on duals"
-    data.createVariable(
-        "pv_bias", "f4", ("Time", "nVertices", "nVertLevels"))
-    data["pv_bias"].long_name = \
-        "Upwind-bias for PV, averaged to duals"
-
+    
     """
+    data.createVariable(
+        "ke_dual", "f4", ("Time", "nVertices", "nVertLevels"))
+    data["ke_dual"].long_name = "Kinetic energy on duals"
+    data.createVariable(
+        "pv_cell", "f4", ("Time", "nCells", "nVertLevels"))
+    data["pv_cell"].long_name = "Potential vorticity on cells"
+    data.createVariable(
+        "rv_cell", "f4", ("Time", "nCells", "nVertLevels"))
+    data["rv_cell"].long_name = "Relative vorticity on cells"
+    
     data.createVariable(
         "ux_dual", "f4", ("Time", "nVertices", "nVertLevels"))
     data["ux_dual"].long_name = "x-component of velocity"
@@ -415,13 +432,6 @@ def init_file(name, cnfg, save):
         "uz_dual", "f4", ("Time", "nVertices", "nVertLevels"))
     data["uz_dual"].long_name = "z-component of velocity"
     """
-
-    data.createVariable("kp_sums", "f8", ("Step"))
-    data["kp_sums"].long_name = \
-        "Relative change in total KE+PE over time"
-    data.createVariable("en_sums", "f8", ("Step"))
-    data["en_sums"].long_name = \
-        "Relative change in total PV**2 over time"
 
     data.close()
 
@@ -539,6 +549,12 @@ if (__name__ == "__main__"):
         default=0.E+00,
         required=False,
         help="DEL^4 damping coeff. {DAMP = +0.E+00}.")
+        
+    parser.add_argument(
+        "--vu-du-mul", dest="vu_du_mul", type=float,
+        default=1.E+00,
+        required=False,
+        help="DEL^k div. amplifier {MUL. = +1.E+00}.")
 
     parser.add_argument(
         "--loglaw-z0", dest="loglaw_z0", type=float,
@@ -577,6 +593,18 @@ if (__name__ == "__main__"):
         help="Evaluate statistics at each FREQ-th step.")
 
     parser.add_argument(
+        "--no-u-tend", dest="no_u_tend", 
+        type=lambda x: bool(strtobool(str(x.strip()))),
+        required=False, 
+        default=False, help="Disable uu-tend. terms.")
+        
+    parser.add_argument(
+        "--no-h-tend", dest="no_h_tend", 
+        type=lambda x: bool(strtobool(str(x.strip()))),
+        required=False, 
+        default=False, help="Disable hh-tend. terms.")
+
+    parser.add_argument(
         "--no-advect", dest="no_advect", 
         type=lambda x: bool(strtobool(str(x.strip()))),
         required=False, 
@@ -587,7 +615,7 @@ if (__name__ == "__main__"):
         type=lambda x: bool(strtobool(str(x.strip()))),
         required=False, 
         default=False, help="Disable coriolis terms.")
-
+    
     parser.add_argument(
         "--FB-weight", dest="fb_weight", type=float,
         required=False,
@@ -595,5 +623,5 @@ if (__name__ == "__main__"):
         help="Forward-backward weights for integrators.")
 
     swe(parser.parse_args())
-
-
+    
+    

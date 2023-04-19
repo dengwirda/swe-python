@@ -145,7 +145,8 @@ def init(name, save, rsph=1.E+0, pert=True):
 
     ttic = time.time()
     hdel, info = gcrotmk(
-        trsk.cell_del2_sums, vrhs, tol=1.E-8, m=50, k=25)
+        trsk.cell_del2_sums, vrhs, 
+            tol=1.E-8, atol=1.E-8, m=50, k=25)
     ttoc = time.time()
    #print(ttoc - ttic)    
     

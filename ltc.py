@@ -126,7 +126,7 @@ def ltc2(name, save, rsph, mesh, trsk, xmid, ymid):
     zb_cell+= np.asarray(
         data["ice_thickness"][:], dtype=np.float64)
 
-    zb_cell = np.minimum(-5.0, zb_cell)  # not too shallow
+    zb_cell = np.minimum(-10.0, zb_cell)  # not too shallow
 
     uu_edge = np.zeros(mesh.edge.size, dtype=np.float64)
 

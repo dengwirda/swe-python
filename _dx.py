@@ -12,6 +12,8 @@ UU_TINY        = 1.0E-12
 PV_TINY        = 1.0E-16
 KE_TINY        = 1.0E-04
 
+LH_BIAS        = 2.0/3.0    # lo-hi flux bias
+
 class base: pass
 tcpu = base()
 tcpu.thickness = 0.0E+00
@@ -21,6 +23,7 @@ tcpu.compute_H = 0.0E+00
 tcpu.computeKE = 0.0E+00
 tcpu.computePV = 0.0E+00
 tcpu.advect_PV = 0.0E+00
+tcpu.computeVV = 0.0E+00
 tcpu.computeDU = 0.0E+00
 tcpu.computeVU = 0.0E+00
 tcpu.computeDW = 0.0E+00
@@ -43,7 +46,7 @@ def diag_vars(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     zb_cell = flow.zb_cell
 
-    vv_edge = trsk.edge_lsqr_perp * uu_edge * +1.
+    vv_edge = computeVV(mesh, trsk, cnfg, uu_edge)
 
     hh_dual, \
     hh_edge = compute_H(mesh, trsk, cnfg, hh_cell, uu_edge)
@@ -76,20 +79,18 @@ def invariant(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
 
     zb_cell = flow.zb_cell
 
-    vv_edge = trsk.edge_lsqr_perp * uu_edge * +1.
+    vv_edge = computeVV(mesh, trsk, cnfg, uu_edge)
 
     hh_dual, \
     hh_edge = compute_H(mesh, trsk, cnfg, hh_cell, uu_edge)
 
-    ke_edge =  0.5 * uu_edge ** 2
-
-    ke_edge = ke_edge * hh_edge * mesh.edge.clen \
-                                * mesh.edge.vlen
+    ke_edge = uu_edge ** 2
+    ke_edge*= hh_edge * mesh.edge.area
     
     pe_cell = flow.grav * (
         hh_cell * 0.5 + zb_cell - np.min(zb_cell))
 
-    pe_cell = pe_cell * hh_cell * mesh.cell.area
+    pe_cell*= hh_cell * mesh.cell.area
 
     kk_sums = np.sum(ke_edge) + np.sum(pe_cell)
 
@@ -116,8 +117,6 @@ def upwinding(mesh, trsk, cnfg,
               up_kind, up_min_, up_max_):
 
     ttic = time.time()
-
-    lh_bias = +2. / 3.  # lo-hi flux bias
 
     sv_bias = np.zeros(mesh.edge.size, dtype=float)
 
@@ -165,8 +164,8 @@ def upwinding(mesh, trsk, cnfg,
             up_ydel * dy_dual[up_dual] + \
             up_zdel * dz_dual[up_dual]
 
-        sv_edge = lo_edge * (0.0 + lh_bias) + \
-                  hi_edge * (1.0 - lh_bias)
+        sv_edge = lo_edge * (0.0 + LH_BIAS) + \
+                  hi_edge * (1.0 - LH_BIAS)
 
         sv_edge = \
             BIAS * sv_wind + (1. - BIAS) * sv_edge
@@ -183,8 +182,8 @@ def upwinding(mesh, trsk, cnfg,
         sv_apvm = uu_edge * dn_edge + \
                   vv_edge * dp_edge
 
-        sv_edge = lo_edge * (0.0 + lh_bias) + \
-                  hi_edge * (1.0 - lh_bias)
+        sv_edge = lo_edge * (0.0 + LH_BIAS) + \
+                  hi_edge * (1.0 - LH_BIAS)
 
         sv_edge-= delta_t * sv_apvm
         
@@ -206,13 +205,13 @@ def upwinding(mesh, trsk, cnfg,
         um_edge = UU_TINY + \
             np.sqrt(uu_edge ** 2 + vv_edge ** 2)
 
-        sv_wind = uu_edge * dn_edge + \
-                  vv_edge * dp_edge
-        sv_wind/= um_edge
+        sv_wind =(uu_edge * dn_edge + \
+                  vv_edge * dp_edge ) \
+                / um_edge
         sv_wind*= mesh.edge.slen
         
-        sv_edge = lo_edge * (0.0 + lh_bias) + \
-                  hi_edge * (1.0 - lh_bias)
+        sv_edge = lo_edge * (0.0 + LH_BIAS) + \
+                  hi_edge * (1.0 - LH_BIAS)
 
         sv_edge-= up_min_ * sv_wind
 
@@ -227,34 +226,38 @@ def upwinding(mesh, trsk, cnfg,
         dn_edge = trsk.edge_grad_norm * sv_cell
         dp_edge = trsk.edge_grad_perp * sv_dual
 
-        dm_edge = 0.5 * (
+        dm_edge = ( ( (0.5 * (
             np.abs(dn_edge * mesh.edge.clen) +
             np.abs(dp_edge * mesh.edge.vlen)
-        )
+        )   ) ** 2) ** 2) ** 2
 
-        dm_vert = sv_tiny + \
+        dm_vert = np.sqrt(np.sqrt(np.sqrt(
             (trsk.dual_edge_sums * dm_edge) / 3.
+        )   )   ) + sv_tiny
 
-        ds_dual = (
-            (sv_dual - sm_dual)  / dm_vert)** 2
+        ds_dual = ( ( (
+            (sv_dual - sm_dual)  / dm_vert / 1.125
+            ) ** 2) ** 2) ** 2
        
-        sv_bias = np.sqrt(
+        sv_bias = np.sqrt(np.sqrt(np.sqrt(
             (trsk.edge_vert_sums * ds_dual) / 2.
-        )
+        )   )   )
 
     #-- upwind APVM, scale w grid
         um_edge = UU_TINY + \
             np.sqrt(uu_edge ** 2 + vv_edge ** 2)
 
-        sv_wind = uu_edge * dn_edge + \
-                  vv_edge * dp_edge
-        sv_wind/= um_edge
+        sv_wind =(uu_edge * dn_edge + \
+                  vv_edge * dp_edge ) \
+                / um_edge
         sv_wind*= mesh.edge.slen
 
         sv_bias = up_min_ + \
             np.minimum(up_max_ - up_min_, sv_bias)
 
-        lh_bias = np.sqrt(sv_bias)
+        lh_bias = \
+            np.maximum(1.0 / 6.0, np.sqrt(sv_bias))
+            
         sv_edge = lo_edge * (0.0 + lh_bias) + \
                   hi_edge * (1.0 - lh_bias)
                   
@@ -267,6 +270,8 @@ def upwinding(mesh, trsk, cnfg,
 
 
 def compute_H(mesh, trsk, cnfg, hh_cell, uu_edge):
+
+#-- compute discrete thickness
 
     ttic = time.time()
 
@@ -296,6 +301,8 @@ def computePV(mesh, trsk, cnfg,
               hh_cell, hh_edge, hh_dual, uu_edge, vv_edge, 
               ff_dual, ff_edge, ff_cell,
               delta_t):
+
+#-- compute discrete vorticity
 
     ttic = time.time()
 
@@ -341,14 +348,26 @@ def computePV(mesh, trsk, cnfg,
         hi_edge = trsk.edge_vert_sums * pv_dual / 2.0
         hi_edge+= trsk.edge_dual_reco * lo_dual
 
-        pv_edge, up_edge = upwinding(
-            mesh, trsk, cnfg, 
-            lo_dual, pv_dual, pv_cell, 
-            lo_edge, hi_edge,
-            uu_edge, vv_edge, 
-            delta_t, PV_TINY, 
-            cnfg.pv_upwind, 
-            cnfg.pv_min_up, cnfg.pv_max_up)
+        if ("UPWIND" in cnfg.pv_scheme):
+
+            pv_edge, up_edge = upwinding(
+                mesh, trsk, cnfg, 
+                lo_dual, pv_dual, pv_cell, 
+                lo_edge, hi_edge,
+                uu_edge, vv_edge, 
+                delta_t, PV_TINY, 
+                cnfg.pv_upwind, 
+                cnfg.pv_min_up, cnfg.pv_max_up)
+                
+        if ("CENTRE" in cnfg.pv_scheme):
+        
+            up_edge = np.zeros(
+                mesh.edge.size, dtype=np.float64)
+        
+            pv_edge = \
+                lo_edge * (0.0 + LH_BIAS) + \
+                hi_edge * (1.0 - LH_BIAS)
+
 
     if (cnfg.operators == "TRSK-MD"):
 
@@ -376,14 +395,25 @@ def computePV(mesh, trsk, cnfg,
         
         lo_dual = trsk.dual_edge_sums * lo_edge / 3.0
         
-        pv_edge, up_edge = upwinding(
-            mesh, trsk, cnfg, 
-            lo_dual, pv_dual, pv_cell, 
-            lo_edge, hi_edge, 
-            uu_edge, vv_edge, 
-            delta_t, PV_TINY, 
-            cnfg.pv_upwind, 
-            cnfg.pv_min_up, cnfg.pv_max_up)
+        if ("UPWIND" in cnfg.pv_scheme):
+
+            pv_edge, up_edge = upwinding(
+                mesh, trsk, cnfg, 
+                lo_dual, pv_dual, pv_cell, 
+                lo_edge, hi_edge,
+                uu_edge, vv_edge, 
+                delta_t, PV_TINY, 
+                cnfg.pv_upwind, 
+                cnfg.pv_min_up, cnfg.pv_max_up)
+                
+        if ("CENTRE" in cnfg.pv_scheme):
+        
+            up_edge = np.zeros(
+                mesh.edge.size, dtype=np.float64)
+        
+            pv_edge = \
+                lo_edge * (0.0 + LH_BIAS) + \
+                hi_edge * (1.0 - LH_BIAS)
 
     ttoc = time.time()
     tcpu.computePV = tcpu.computePV + (ttoc - ttic)
@@ -395,6 +425,8 @@ def computePV(mesh, trsk, cnfg,
 def computeKE(mesh, trsk, cnfg, 
               hh_cell, hh_edge, hh_dual, uu_edge, vv_edge,
               delta_t):
+
+#-- reconstruct kinetic energy
 
     ttic = time.time()
 
@@ -537,6 +569,8 @@ def computeKE(mesh, trsk, cnfg,
 
 def advect_PV(mesh, trsk, cnfg, uh_edge, pv_edge):
 
+#-- energy-neutral PV. flux
+
     ttic = time.time()
 
     pv_flux = -.5 * (
@@ -548,9 +582,25 @@ def advect_PV(mesh, trsk, cnfg, uh_edge, pv_edge):
     tcpu.advect_PV = tcpu.advect_PV + (ttoc - ttic)
 
     return pv_flux
+    
+    
+def computeVV(mesh, trsk, cnfg, uu_edge):
+
+#-- get tangential velocity
+
+    ttic = time.time()
+
+    vv_edge = trsk.edge_lsqr_perp * uu_edge
+
+    ttoc = time.time()
+    tcpu.computeVV = tcpu.computeVV + (ttoc - ttic)
+
+    return vv_edge
 
 
 def computeDU(mesh, trsk, cnfg, uu_edge):
+
+#-- damping div^k operators
 
     if (cnfg.du_damp_2 == 0 and 
         cnfg.du_damp_4 == 0):
@@ -561,22 +611,20 @@ def computeDU(mesh, trsk, cnfg, uu_edge):
 #-- div(u.n)
     du_cell = trsk.cell_flux_sums * uu_edge
     du_cell/= mesh.cell.area
+
+#-- D^2 = vk * grad(div(u.n))
+    du_edge = trsk.edge_grad_norm * du_cell
     
-    d2_cell = du_cell * cnfg.du_damp_2
-    d4_cell = du_cell * cnfg.du_damp_4  # NB. sqrt(vk)
-
-#-- D^2 = grad(vk * div(u.n))
-    d2_edge = trsk.edge_grad_norm * d2_cell
-    d4_edge = trsk.edge_grad_norm * d4_cell
-
+    d2_edge = cnfg.du_damp_2 * du_edge
+    d4_edge = cnfg.du_damp_4 * du_edge
+      
 #-- div(D^2)
     du_cell = trsk.cell_flux_sums * d4_edge
     du_cell/= mesh.cell.area
     
-    d4_cell = du_cell * cnfg.du_damp_4  # NB. sqrt(vk)
-
-#-- D^4 = grad(vk * div(D^2))
-    d4_edge = trsk.edge_grad_norm * d4_cell
+#-- D^4 = vk * grad(div(D^2))              
+    d4_edge = trsk.edge_grad_norm * du_cell
+    d4_edge*= cnfg.vu_damp_4        # NB. sqrt(vk)
     
     ttoc = time.time()
     tcpu.computeDU = tcpu.computeDU + (ttoc - ttic)
@@ -586,15 +634,46 @@ def computeDU(mesh, trsk, cnfg, uu_edge):
 
 def computeVU(mesh, trsk, cnfg, uu_edge):
 
+#-- viscous del^k operators
+
     if (cnfg.vu_damp_2 == 0 and 
         cnfg.vu_damp_4 == 0):
         return np.zeros(mesh.edge.size, dtype=float)
 
     ttic = time.time()
 
-    v2_edge = np.zeros(mesh.edge.size, dtype=float)
-    v4_edge = np.zeros(mesh.edge.size, dtype=float)
+#-- div(u.n)
+    du_cell = trsk.cell_flux_sums * uu_edge
+    du_cell/=(mesh.cell.area /
+              cnfg.vu_du_mul )
+    
+#-- rot(u.n)
+    rv_dual = trsk.dual_flux_sums * uu_edge
+    rv_dual/= mesh.vert.area
 
+#-- V^2 = vk * grad(div(u.n)) - 
+#--       vk * grad(rot(u.n))
+    vu_edge = trsk.edge_grad_norm * du_cell - \
+              trsk.edge_grad_perp * rv_dual
+              
+    v2_edge = cnfg.vu_damp_2 * vu_edge
+    v4_edge = cnfg.vu_damp_4 * vu_edge
+      
+#-- div(V^2)
+    du_cell = trsk.cell_flux_sums * v4_edge
+    du_cell/=(mesh.cell.area /
+              cnfg.vu_du_mul )
+    
+#-- rot(V^2)
+    rv_dual = trsk.dual_flux_sums * v4_edge
+    rv_dual/= mesh.vert.area
+    
+#-- V^4 = vk * grad(div(V^2)) - 
+#--       vk * grad(rot(V^2))              
+    v4_edge = trsk.edge_grad_norm * du_cell - \
+              trsk.edge_grad_perp * rv_dual
+    v4_edge*= cnfg.vu_damp_4        # NB. sqrt(vk)
+    
     ttoc = time.time()
     tcpu.computeVU = tcpu.computeVU + (ttoc - ttic)
 
@@ -603,10 +682,12 @@ def computeVU(mesh, trsk, cnfg, uu_edge):
 
 def computeCd(mesh, trsk, cnfg, hh_cell, uu_edge):
 
+#-- loglaw bottom drag term
+
     VONK = 0.4  # von karman parameter
 
     hh_edge = hrmn_mean(
-        hh_cell[mesh.edge.cell[:, 0] - 1], 
+        hh_cell[mesh.edge.cell[:, 0] - 1],
         hh_cell[mesh.edge.cell[:, 1] - 1])
 
     hh_edge = np.maximum(HH_TINY, hh_edge)
@@ -620,7 +701,8 @@ def computeCd(mesh, trsk, cnfg, hh_cell, uu_edge):
     cd_edge = np.minimum(cnfg.loglaw_hi, cd_edge)
     cd_edge = np.maximum(cnfg.loglaw_lo, cd_edge)
 
-    vv_edge = trsk.edge_lsqr_perp * uu_edge * +1.
+    vv_edge = \
+        computeVV(mesh, trsk, cnfg, uu_edge)
 
     ke_edge = 0.5 * (uu_edge ** 2 + 
                      vv_edge ** 2 )
@@ -630,6 +712,10 @@ def computeCd(mesh, trsk, cnfg, hh_cell, uu_edge):
 
 def computeMS(mesh, trsk, cnfg, 
               hh_cell, uu_edge, ht_cell, ut_edge):
+
+#-- "dispersive wave" terms
+
+    ttic = time.time()
 
     hh_dual, \
     hh_edge = compute_H(mesh, trsk, cnfg, hh_cell, uu_edge)
@@ -649,6 +735,9 @@ def computeMS(mesh, trsk, cnfg,
 
     d2_edge = trsk.edge_grad_norm * ut_cell
     d2_edge*= hh_edge ** 2 / 6.0
+    
+    ttoc = time.time()
+    tcpu.computeDW = tcpu.computeDW + (ttoc - ttic)
 
     return d1_edge - d2_edge
 
