@@ -5,7 +5,7 @@ from scipy.sparse import csr_matrix, spdiags
 from scipy.sparse.csgraph import reverse_cuthill_mckee
 
 
-def load_mesh(name, rsph=None, sort=None):
+def load_mesh(name, rsph=None):
     """
     LOAD-MESH: load the NAME.nc MPAS mesh file into a
     local mesh data structure.
@@ -81,9 +81,6 @@ def load_mesh(name, rsph=None, sort=None):
         np.array(data.variables["cellsOnVertex"])
 
 
-    mesh = sort_mesh(mesh, sort)  # redo indexing for locality
-
-
     xhat = (
         mesh.vert.xpos[mesh.edge.vert[:, 1] - 1] -
         mesh.vert.xpos[mesh.edge.vert[:, 0] - 1]
@@ -99,12 +96,9 @@ def load_mesh(name, rsph=None, sort=None):
 
     lhat = np.sqrt(xhat ** 2 + yhat ** 2 + zhat ** 2)
     
-    mesh.edge.xprp = spdiags(
-        xhat / lhat, 0, mesh.edge.size, mesh.edge.size)
-    mesh.edge.yprp = spdiags(
-        yhat / lhat, 0, mesh.edge.size, mesh.edge.size)
-    mesh.edge.zprp = spdiags(
-        zhat / lhat, 0, mesh.edge.size, mesh.edge.size)
+    mesh.edge.xprp = xhat / lhat
+    mesh.edge.yprp = yhat / lhat
+    mesh.edge.zprp = zhat / lhat
 
 
     xhat = (
@@ -122,12 +116,9 @@ def load_mesh(name, rsph=None, sort=None):
 
     lhat = np.sqrt(xhat ** 2 + yhat ** 2 + zhat ** 2)
     
-    mesh.edge.xnrm = spdiags(
-        xhat / lhat, 0, mesh.edge.size, mesh.edge.size)
-    mesh.edge.ynrm = spdiags(
-        yhat / lhat, 0, mesh.edge.size, mesh.edge.size)
-    mesh.edge.znrm = spdiags(
-        zhat / lhat, 0, mesh.edge.size, mesh.edge.size)
+    mesh.edge.xnrm = xhat / lhat
+    mesh.edge.ynrm = yhat / lhat
+    mesh.edge.znrm = zhat / lhat
 
 
     mesh.cell.xmid = \
@@ -163,122 +154,17 @@ def load_mesh(name, rsph=None, sort=None):
     mesh.vert.mlon, mesh.vert.mlat = to_sphere(
         mesh, mesh.vert.xmid, mesh.vert.ymid, mesh.vert.zmid)
 
-
     mesh.cell.area = cell_area (mesh)
     mesh.edge.area = edge_area (mesh)
     mesh.vert.area = dual_area (mesh)
 
-    mesh.vert.kite = np.zeros(
-        (mesh.vert.size, 3), dtype=np.float64)
-    mesh.vert.kite[:, 0]+= tria_area(
-        mesh.rsph,
-        np.vstack((mesh.vert.xlon, mesh.vert.ylat)).T,
-        np.vstack((mesh.cell.xlon[mesh.vert.cell[:, 0] - 1],
-                   mesh.cell.ylat[mesh.vert.cell[:, 0] - 1])).T,
-        np.vstack((mesh.edge.xlon[mesh.vert.edge[:, 1] - 1],
-                   mesh.edge.ylat[mesh.vert.edge[:, 1] - 1])).T
-    )
-    mesh.vert.kite[:, 0]+= tria_area(
-        mesh.rsph,
-        np.vstack((mesh.vert.xlon, mesh.vert.ylat)).T,
-        np.vstack((mesh.cell.xlon[mesh.vert.cell[:, 0] - 1],
-                   mesh.cell.ylat[mesh.vert.cell[:, 0] - 1])).T,
-        np.vstack((mesh.edge.xlon[mesh.vert.edge[:, 0] - 1],
-                   mesh.edge.ylat[mesh.vert.edge[:, 0] - 1])).T
-    )
-
-    mesh.vert.kite[:, 1]+= tria_area(
-        mesh.rsph,
-        np.vstack((mesh.vert.xlon, mesh.vert.ylat)).T,
-        np.vstack((mesh.cell.xlon[mesh.vert.cell[:, 1] - 1],
-                   mesh.cell.ylat[mesh.vert.cell[:, 1] - 1])).T,
-        np.vstack((mesh.edge.xlon[mesh.vert.edge[:, 2] - 1],
-                   mesh.edge.ylat[mesh.vert.edge[:, 2] - 1])).T
-    )
-    mesh.vert.kite[:, 1]+= tria_area(
-        mesh.rsph,
-        np.vstack((mesh.vert.xlon, mesh.vert.ylat)).T,
-        np.vstack((mesh.cell.xlon[mesh.vert.cell[:, 1] - 1],
-                   mesh.cell.ylat[mesh.vert.cell[:, 1] - 1])).T,
-        np.vstack((mesh.edge.xlon[mesh.vert.edge[:, 1] - 1],
-                   mesh.edge.ylat[mesh.vert.edge[:, 1] - 1])).T
-    )
-
-    mesh.vert.kite[:, 2]+= tria_area(
-        mesh.rsph,
-        np.vstack((mesh.vert.xlon, mesh.vert.ylat)).T,
-        np.vstack((mesh.cell.xlon[mesh.vert.cell[:, 2] - 1],
-                   mesh.cell.ylat[mesh.vert.cell[:, 2] - 1])).T,
-        np.vstack((mesh.edge.xlon[mesh.vert.edge[:, 0] - 1],
-                   mesh.edge.ylat[mesh.vert.edge[:, 0] - 1])).T
-    )
-    mesh.vert.kite[:, 2]+= tria_area(
-        mesh.rsph,
-        np.vstack((mesh.vert.xlon, mesh.vert.ylat)).T,
-        np.vstack((mesh.cell.xlon[mesh.vert.cell[:, 2] - 1],
-                   mesh.cell.ylat[mesh.vert.cell[:, 2] - 1])).T,
-        np.vstack((mesh.edge.xlon[mesh.vert.edge[:, 2] - 1],
-                   mesh.edge.ylat[mesh.vert.edge[:, 2] - 1])).T
-    )
-
-    mesh.edge.stub = np.zeros(
-        (mesh.edge.size, 2), dtype=np.float64)
-    mesh.edge.stub[:, 0] = tria_area(
-        mesh.rsph,
-        np.vstack((mesh.vert.xlon[mesh.edge.vert[:, 0] - 1],
-                   mesh.vert.ylat[mesh.edge.vert[:, 0] - 1])).T,
-        np.vstack((mesh.cell.xlon[mesh.edge.cell[:, 1] - 1],
-                   mesh.cell.ylat[mesh.edge.cell[:, 1] - 1])).T,
-        np.vstack((mesh.cell.xlon[mesh.edge.cell[:, 0] - 1],
-                   mesh.cell.ylat[mesh.edge.cell[:, 0] - 1])).T
-    )
-    mesh.edge.stub[:, 1] = tria_area(
-        mesh.rsph,
-        np.vstack((mesh.vert.xlon[mesh.edge.vert[:, 1] - 1],
-                   mesh.vert.ylat[mesh.edge.vert[:, 1] - 1])).T,
-        np.vstack((mesh.cell.xlon[mesh.edge.cell[:, 0] - 1],
-                   mesh.cell.ylat[mesh.edge.cell[:, 0] - 1])).T,
-        np.vstack((mesh.cell.xlon[mesh.edge.cell[:, 1] - 1],
-                   mesh.cell.ylat[mesh.edge.cell[:, 1] - 1])).T
-    )
-
-    mesh.edge.wing = np.zeros(
-        (mesh.edge.size, 3), dtype=np.float64)
-    mesh.edge.wing[:, 0] = tria_area(
-        mesh.rsph,
-        np.vstack((mesh.vert.xlon[mesh.edge.vert[:, 1] - 1],
-                   mesh.vert.ylat[mesh.edge.vert[:, 1] - 1])).T,
-        np.vstack((mesh.cell.xlon[mesh.edge.cell[:, 0] - 1],
-                   mesh.cell.ylat[mesh.edge.cell[:, 0] - 1])).T,
-        np.vstack((mesh.vert.xlon[mesh.edge.vert[:, 0] - 1],
-                   mesh.vert.ylat[mesh.edge.vert[:, 0] - 1])).T
-    )
-    mesh.edge.wing[:, 1] = tria_area(
-        mesh.rsph,
-        np.vstack((mesh.vert.xlon[mesh.edge.vert[:, 0] - 1],
-                   mesh.vert.ylat[mesh.edge.vert[:, 0] - 1])).T,
-        np.vstack((mesh.cell.xlon[mesh.edge.cell[:, 1] - 1],
-                   mesh.cell.ylat[mesh.edge.cell[:, 1] - 1])).T,
-        np.vstack((mesh.vert.xlon[mesh.edge.vert[:, 1] - 1],
-                   mesh.vert.ylat[mesh.edge.vert[:, 1] - 1])).T
-    )
-
-    mesh.edge.vlen = circ_dist(
-        mesh.rsph, 
-        np.vstack((mesh.vert.xlon[mesh.edge.vert[:, 0] - 1],
-                   mesh.vert.ylat[mesh.edge.vert[:, 0] - 1])).T,
-        np.vstack((mesh.vert.xlon[mesh.edge.vert[:, 1] - 1],
-                   mesh.vert.ylat[mesh.edge.vert[:, 1] - 1])).T
-    )
-        
-    mesh.edge.dlen = circ_dist(
-        mesh.rsph, 
-        np.vstack((mesh.cell.xlon[mesh.edge.cell[:, 0] - 1],
-                   mesh.cell.ylat[mesh.edge.cell[:, 0] - 1])).T,
-        np.vstack((mesh.cell.xlon[mesh.edge.cell[:, 1] - 1],
-                   mesh.cell.ylat[mesh.edge.cell[:, 1] - 1])).T
-    )
+    mesh.vert.kite = mesh_kite (mesh)
+    mesh.edge.stub = mesh_stub (mesh)
+    mesh.edge.wing = mesh_wing (mesh)
     
+    mesh.edge.vlen, \
+    mesh.edge.dlen = mesh_arcs (mesh)
+
     # can set this as 2 * A_e / l_e instead of the TRSK-CV
     # operators, as per Weller
     mesh.edge.clen = 2.0 * mesh.edge.area / mesh.edge.vlen
@@ -289,6 +175,170 @@ def load_mesh(name, rsph=None, sort=None):
 
     return mesh
 
+
+def mesh_kite(mesh):
+
+#-- cell-dual overlapping areas
+
+    kite = np.zeros((mesh.vert.size, 3), dtype=np.float64)
+    kite[:, 0]+= tria_area(
+        mesh.rsph,
+        np.vstack((mesh.vert.xlon, mesh.vert.ylat)).T,
+        np.vstack((
+            mesh.cell.xlon[mesh.vert.cell[:, 0] - 1],
+            mesh.cell.ylat[mesh.vert.cell[:, 0] - 1])).T,
+        np.vstack((
+            mesh.edge.xlon[mesh.vert.edge[:, 1] - 1],
+            mesh.edge.ylat[mesh.vert.edge[:, 1] - 1])).T
+    )
+    kite[:, 0]+= tria_area(
+        mesh.rsph,
+        np.vstack((mesh.vert.xlon, mesh.vert.ylat)).T,
+        np.vstack((
+            mesh.cell.xlon[mesh.vert.cell[:, 0] - 1],
+            mesh.cell.ylat[mesh.vert.cell[:, 0] - 1])).T,
+        np.vstack((
+            mesh.edge.xlon[mesh.vert.edge[:, 0] - 1],
+            mesh.edge.ylat[mesh.vert.edge[:, 0] - 1])).T
+    )
+
+    kite[:, 1]+= tria_area(
+        mesh.rsph,
+        np.vstack((mesh.vert.xlon, mesh.vert.ylat)).T,
+        np.vstack((
+            mesh.cell.xlon[mesh.vert.cell[:, 1] - 1],
+            mesh.cell.ylat[mesh.vert.cell[:, 1] - 1])).T,
+        np.vstack((
+            mesh.edge.xlon[mesh.vert.edge[:, 2] - 1],
+            mesh.edge.ylat[mesh.vert.edge[:, 2] - 1])).T
+    )
+    kite[:, 1]+= tria_area(
+        mesh.rsph,
+        np.vstack((mesh.vert.xlon, mesh.vert.ylat)).T,
+        np.vstack((
+            mesh.cell.xlon[mesh.vert.cell[:, 1] - 1],
+            mesh.cell.ylat[mesh.vert.cell[:, 1] - 1])).T,
+        np.vstack((
+            mesh.edge.xlon[mesh.vert.edge[:, 1] - 1],
+            mesh.edge.ylat[mesh.vert.edge[:, 1] - 1])).T
+    )
+
+    kite[:, 2]+= tria_area(
+        mesh.rsph,
+        np.vstack((mesh.vert.xlon, mesh.vert.ylat)).T,
+        np.vstack((
+            mesh.cell.xlon[mesh.vert.cell[:, 2] - 1],
+            mesh.cell.ylat[mesh.vert.cell[:, 2] - 1])).T,
+        np.vstack((
+            mesh.edge.xlon[mesh.vert.edge[:, 0] - 1],
+            mesh.edge.ylat[mesh.vert.edge[:, 0] - 1])).T
+    )
+    kite[:, 2]+= tria_area(
+        mesh.rsph,
+        np.vstack((mesh.vert.xlon, mesh.vert.ylat)).T,
+        np.vstack((
+            mesh.cell.xlon[mesh.vert.cell[:, 2] - 1],
+            mesh.cell.ylat[mesh.vert.cell[:, 2] - 1])).T,
+        np.vstack((
+            mesh.edge.xlon[mesh.vert.edge[:, 2] - 1],
+            mesh.edge.ylat[mesh.vert.edge[:, 2] - 1])).T
+    )
+
+    return kite
+    
+    
+def mesh_stub(mesh):
+
+#-- edge-dual overlapping areas
+
+    stub = np.zeros((mesh.edge.size, 2), dtype=np.float64)
+    stub[:, 0] = tria_area(
+        mesh.rsph,
+        np.vstack((
+            mesh.vert.xlon[mesh.edge.vert[:, 0] - 1],
+            mesh.vert.ylat[mesh.edge.vert[:, 0] - 1])).T,
+        np.vstack((
+            mesh.cell.xlon[mesh.edge.cell[:, 1] - 1],
+            mesh.cell.ylat[mesh.edge.cell[:, 1] - 1])).T,
+        np.vstack((
+            mesh.cell.xlon[mesh.edge.cell[:, 0] - 1],
+            mesh.cell.ylat[mesh.edge.cell[:, 0] - 1])).T
+    )
+    stub[:, 1] = tria_area(
+        mesh.rsph,
+        np.vstack((
+            mesh.vert.xlon[mesh.edge.vert[:, 1] - 1],
+            mesh.vert.ylat[mesh.edge.vert[:, 1] - 1])).T,
+        np.vstack((
+            mesh.cell.xlon[mesh.edge.cell[:, 0] - 1],
+            mesh.cell.ylat[mesh.edge.cell[:, 0] - 1])).T,
+        np.vstack((
+            mesh.cell.xlon[mesh.edge.cell[:, 1] - 1],
+            mesh.cell.ylat[mesh.edge.cell[:, 1] - 1])).T
+    )
+
+    return stub
+    
+    
+def mesh_wing(mesh):
+
+#-- edge-cell overlapping areas
+
+    wing = np.zeros((mesh.edge.size, 2), dtype=np.float64)
+    wing[:, 0] = tria_area(
+        mesh.rsph,
+        np.vstack((
+            mesh.vert.xlon[mesh.edge.vert[:, 1] - 1],
+            mesh.vert.ylat[mesh.edge.vert[:, 1] - 1])).T,
+        np.vstack((
+            mesh.cell.xlon[mesh.edge.cell[:, 0] - 1],
+            mesh.cell.ylat[mesh.edge.cell[:, 0] - 1])).T,
+        np.vstack((
+            mesh.vert.xlon[mesh.edge.vert[:, 0] - 1],
+            mesh.vert.ylat[mesh.edge.vert[:, 0] - 1])).T
+    )
+    wing[:, 1] = tria_area(
+        mesh.rsph,
+        np.vstack((
+            mesh.vert.xlon[mesh.edge.vert[:, 0] - 1],
+            mesh.vert.ylat[mesh.edge.vert[:, 0] - 1])).T,
+        np.vstack((
+            mesh.cell.xlon[mesh.edge.cell[:, 1] - 1],
+            mesh.cell.ylat[mesh.edge.cell[:, 1] - 1])).T,
+        np.vstack((
+            mesh.vert.xlon[mesh.edge.vert[:, 1] - 1],
+            mesh.vert.ylat[mesh.edge.vert[:, 1] - 1])).T
+    )
+
+    return wing
+    
+    
+def mesh_arcs(mesh):
+
+#-- arc-lengths: vert and cells
+
+    vlen = circ_dist(
+        mesh.rsph, 
+        np.vstack((
+            mesh.vert.xlon[mesh.edge.vert[:, 0] - 1],
+            mesh.vert.ylat[mesh.edge.vert[:, 0] - 1])).T,
+        np.vstack((
+            mesh.vert.xlon[mesh.edge.vert[:, 1] - 1],
+            mesh.vert.ylat[mesh.edge.vert[:, 1] - 1])).T
+    )
+        
+    dlen = circ_dist(
+        mesh.rsph, 
+        np.vstack((
+            mesh.cell.xlon[mesh.edge.cell[:, 0] - 1],
+            mesh.cell.ylat[mesh.edge.cell[:, 0] - 1])).T,
+        np.vstack((
+            mesh.cell.xlon[mesh.edge.cell[:, 1] - 1],
+            mesh.cell.ylat[mesh.edge.cell[:, 1] - 1])).T
+    )
+
+    return vlen, dlen
+    
 
 def sort_mesh(mesh, sort=None):
     """
@@ -328,12 +378,16 @@ def sort_mesh(mesh, sort=None):
     mask = mesh.vert.cell > 0
     mesh.vert.cell[mask] = \
         mesh.cell.irev[mesh.vert.cell[mask] - 1] + 0
-
+    
     mesh.cell.xpos = mesh.cell.xpos[mesh.cell.ifwd - 1]
     mesh.cell.ypos = mesh.cell.ypos[mesh.cell.ifwd - 1]
     mesh.cell.zpos = mesh.cell.zpos[mesh.cell.ifwd - 1]
+    mesh.cell.xmid = mesh.cell.xmid[mesh.cell.ifwd - 1]
+    mesh.cell.ymid = mesh.cell.ymid[mesh.cell.ifwd - 1]
+    mesh.cell.zmid = mesh.cell.zmid[mesh.cell.ifwd - 1]
     mesh.cell.xlon = mesh.cell.xlon[mesh.cell.ifwd - 1]
     mesh.cell.ylat = mesh.cell.ylat[mesh.cell.ifwd - 1]
+    mesh.cell.area = mesh.cell.area[mesh.cell.ifwd - 1]
     mesh.cell.vert = mesh.cell.vert[mesh.cell.ifwd - 1]
     mesh.cell.edge = mesh.cell.edge[mesh.cell.ifwd - 1]
     mesh.cell.cell = mesh.cell.cell[mesh.cell.ifwd - 1]
@@ -364,8 +418,13 @@ def sort_mesh(mesh, sort=None):
     mesh.vert.xpos = mesh.vert.xpos[mesh.vert.ifwd - 1]
     mesh.vert.ypos = mesh.vert.ypos[mesh.vert.ifwd - 1]
     mesh.vert.zpos = mesh.vert.zpos[mesh.vert.ifwd - 1]
+    mesh.vert.xmid = mesh.vert.xmid[mesh.vert.ifwd - 1]
+    mesh.vert.ymid = mesh.vert.ymid[mesh.vert.ifwd - 1]
+    mesh.vert.zmid = mesh.vert.zmid[mesh.vert.ifwd - 1]
     mesh.vert.xlon = mesh.vert.xlon[mesh.vert.ifwd - 1]
     mesh.vert.ylat = mesh.vert.ylat[mesh.vert.ifwd - 1]
+    mesh.vert.area = mesh.vert.area[mesh.vert.ifwd - 1]
+    mesh.vert.kite = mesh.vert.kite[mesh.vert.ifwd - 1]
     mesh.vert.edge = mesh.vert.edge[mesh.vert.ifwd - 1]
     mesh.vert.cell = mesh.vert.cell[mesh.vert.ifwd - 1]
 
@@ -398,8 +457,24 @@ def sort_mesh(mesh, sort=None):
     mesh.edge.xpos = mesh.edge.xpos[mesh.edge.ifwd - 1]
     mesh.edge.ypos = mesh.edge.ypos[mesh.edge.ifwd - 1]
     mesh.edge.zpos = mesh.edge.zpos[mesh.edge.ifwd - 1]
+    mesh.edge.xmid = mesh.edge.xmid[mesh.edge.ifwd - 1]
+    mesh.edge.ymid = mesh.edge.ymid[mesh.edge.ifwd - 1]
+    mesh.edge.zmid = mesh.edge.zmid[mesh.edge.ifwd - 1]
+    mesh.edge.xprp = mesh.edge.xprp[mesh.edge.ifwd - 1]
+    mesh.edge.yprp = mesh.edge.yprp[mesh.edge.ifwd - 1]
+    mesh.edge.zprp = mesh.edge.zprp[mesh.edge.ifwd - 1]
+    mesh.edge.xnrm = mesh.edge.xnrm[mesh.edge.ifwd - 1]
+    mesh.edge.ynrm = mesh.edge.ynrm[mesh.edge.ifwd - 1]
+    mesh.edge.znrm = mesh.edge.znrm[mesh.edge.ifwd - 1]
     mesh.edge.xlon = mesh.edge.xlon[mesh.edge.ifwd - 1]
     mesh.edge.ylat = mesh.edge.ylat[mesh.edge.ifwd - 1]
+    mesh.edge.area = mesh.edge.area[mesh.edge.ifwd - 1]
+    mesh.edge.vlen = mesh.edge.vlen[mesh.edge.ifwd - 1]
+    mesh.edge.dlen = mesh.edge.dlen[mesh.edge.ifwd - 1]
+    mesh.edge.clen = mesh.edge.clen[mesh.edge.ifwd - 1]
+    mesh.edge.slen = mesh.edge.slen[mesh.edge.ifwd - 1]
+    mesh.edge.stub = mesh.edge.stub[mesh.edge.ifwd - 1]
+    mesh.edge.wing = mesh.edge.wing[mesh.edge.ifwd - 1]
     mesh.edge.vert = mesh.edge.vert[mesh.edge.ifwd - 1]
     mesh.edge.wmul = mesh.edge.wmul[mesh.edge.ifwd - 1]
     mesh.edge.cell = mesh.edge.cell[mesh.edge.ifwd - 1]
@@ -409,7 +484,7 @@ def sort_mesh(mesh, sort=None):
     return mesh
 
 
-def load_flow(name, mesh=None):
+def load_flow(name, mesh=None, lean=False):
     """
     LOAD-FLOW: load the NAME.nc MPAS mesh file into a
     local flow data structure.
@@ -441,16 +516,7 @@ def load_flow(name, mesh=None):
     flow.ff_vert = np.zeros((nvrt), dtype=float)
 
     flow.uu_edge = np.zeros((step, nedg, nlev), dtype=float)
-    flow.vv_edge = np.zeros((step, nedg, nlev), dtype=float)
-
-    flow.ke_cell = np.zeros((step, ncel, nlev), dtype=float)
-    flow.ke_dual = np.zeros((step, nvrt, nlev), dtype=float)
-
-    flow.rv_cell = np.zeros((step, ncel, nlev), dtype=float)
-    flow.pv_cell = np.zeros((step, ncel, nlev), dtype=float)
-    flow.rv_dual = np.zeros((step, nvrt, nlev), dtype=float)
-    flow.pv_dual = np.zeros((step, nvrt, nlev), dtype=float)
-
+    
     if ("h" in data.variables.keys()):
         flow.hh_cell = np.array(data.variables["h"])
     if ("h_s" in data.variables.keys()):
@@ -465,23 +531,37 @@ def load_flow(name, mesh=None):
     
     if ("u" in data.variables.keys()):
         flow.uu_edge = np.array(data.variables["u"])
-    if ("v" in data.variables.keys()):
-        flow.vv_edge = np.array(data.variables["v"])
-
+    
     if ("hh_cell" in data.variables.keys()):
         flow.hh_cell = np.array(data.variables["hh_cell"])
     if ("zb_cell" in data.variables.keys()):
         flow.zb_cell = np.array(data.variables["zb_cell"])
-
+        
     if ("ff_cell" in data.variables.keys()):
         flow.ff_cell = np.array(data.variables["ff_cell"])
     if ("ff_edge" in data.variables.keys()):
         flow.ff_edge = np.array(data.variables["ff_edge"])
     if ("ff_vert" in data.variables.keys()):
         flow.ff_vert = np.array(data.variables["ff_vert"])
-
+    
     if ("uu_edge" in data.variables.keys()):
         flow.uu_edge = np.array(data.variables["uu_edge"])
+    
+    if (lean is True): return sort_flow(flow, mesh, lean)
+      
+    flow.vv_edge = np.zeros((step, nedg, nlev), dtype=float)
+
+    flow.ke_cell = np.zeros((step, ncel, nlev), dtype=float)
+    flow.ke_dual = np.zeros((step, nvrt, nlev), dtype=float)
+
+    flow.rv_cell = np.zeros((step, ncel, nlev), dtype=float)
+    flow.pv_cell = np.zeros((step, ncel, nlev), dtype=float)
+    flow.rv_dual = np.zeros((step, nvrt, nlev), dtype=float)
+    flow.pv_dual = np.zeros((step, nvrt, nlev), dtype=float)
+
+    if ("v" in data.variables.keys()):
+        flow.vv_edge = np.array(data.variables["v"])
+
     if ("vv_edge" in data.variables.keys()):
         flow.vv_edge = np.array(data.variables["vv_edge"])
 
@@ -500,6 +580,11 @@ def load_flow(name, mesh=None):
     if ("pv_dual" in data.variables.keys()):
         flow.pv_dual = np.array(data.variables["pv_dual"])
 
+    return sort_flow(flow, mesh, lean)
+    
+    
+def sort_flow(flow, mesh=None, lean=False):
+
     if (mesh is None): return flow
 
     flow.hh_cell = flow.hh_cell[:, mesh.cell.ifwd - 1, :]
@@ -511,6 +596,9 @@ def load_flow(name, mesh=None):
     flow.ff_cell = flow.ff_cell[mesh.cell.ifwd - 1]
     
     flow.uu_edge = flow.uu_edge[:, mesh.edge.ifwd - 1, :]
+    
+    if (lean is True): return flow
+    
     flow.vv_edge = flow.vv_edge[:, mesh.edge.ifwd - 1, :]
 
     flow.ke_cell = flow.ke_cell[:, mesh.cell.ifwd - 1, :]
@@ -522,7 +610,7 @@ def load_flow(name, mesh=None):
     flow.pv_dual = flow.pv_dual[:, mesh.vert.ifwd - 1, :]
 
     return flow
-
+    
 
 def cell_ladj(mesh):
 

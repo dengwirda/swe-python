@@ -1,12 +1,19 @@
 
 # TC2 convergence runs
 python3 swe.py \
+--mpas-file="tc2_cvt_7.nc" \
+--num-steps=2880 \
+--time-step=360. \
+--save-freq=240 \
+--stat-freq=120 \
+--integrate="RK32-FB"
+
+python3 swe.py \
 --mpas-file="tc2_cvt_6.nc" \
 --num-steps=8640 \
 --time-step=120. \
 --save-freq=270 \
 --stat-freq=135 \
---operators="TRSK-CV" \
 --integrate="RK22-FB"
 
 python3 swe.py \
@@ -26,7 +33,6 @@ python3 swe.py \
 --time-step=120. \
 --save-freq=3600 \
 --stat-freq=720 \
---operators="TRSK-CV" \
 --integrate="RK22-FB"
 
 
@@ -37,7 +43,6 @@ python3 swe.py \
 --time-step=120. \
 --save-freq=720 \
 --stat-freq=135 \
---operators="TRSK-CV" \
 --integrate="RK22-FB"
 
 
@@ -48,7 +53,6 @@ python3 swe.py \
 --time-step=120. \
 --save-freq=720 \
 --stat-freq=135 \
---operators="TRSK-CV" \
 --integrate="RK22-FB"
 
 python3 swe.py \
@@ -57,7 +61,6 @@ python3 swe.py \
 --time-step=60. \
 --save-freq=1440 \
 --stat-freq=270 \
---operators="TRSK-CV" \
 --integrate="RK22-FB"
 
 
@@ -68,18 +71,24 @@ python3 swe.py \
 --time-step=120. \
 --save-freq=720 \
 --stat-freq=135 \
---operators="TRSK-CV" \
 --integrate="RK22-FB"
 
 
 # Barotropic jet roll-up
 python3 swe.py \
 --mpas-file="jet_cvt_7.nc" \
+--num-steps=2592 \
+--time-step=200. \
+--save-freq=432 \
+--stat-freq=108 \
+--integrate="RK32-FB"
+
+python3 swe.py \
+--mpas-file="jet_cvt_7.nc" \
 --num-steps=4320 \
 --time-step=120. \
 --save-freq=540 \
 --stat-freq=135 \
---operators="TRSK-CV" \
 --integrate="RK22-FB"
 
 python3 swe.py \
@@ -88,7 +97,18 @@ python3 swe.py \
 --time-step=60. \
 --save-freq=1080 \
 --stat-freq=270 \
---operators="TRSK-CV" \
 --integrate="RK22-FB"
+
+
+# Linear gravity-wave
+python3 swe.py \
+--mpas-file="lt1_cvt_7.nc" \
+--num-steps=234 \
+--time-step=1200. \
+--save-freq=18 \
+--stat-freq=18 \
+--integrate="RK32-FB" \
+--no-advect=TRUE \
+--no-rotate=TRUE
 
 

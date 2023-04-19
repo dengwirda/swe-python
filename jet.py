@@ -1,6 +1,4 @@
 
-from distutils.util import strtobool
-
 import time
 import numpy as np
 from scipy.sparse.linalg import gcrotmk
@@ -8,6 +6,8 @@ from scipy.integrate import quadrature
 
 import xarray
 import argparse
+
+from stb import strtobool
 
 from msh import load_mesh, cell_quad, dual_quad
 from ops import trsk_mats
@@ -145,7 +145,8 @@ def init(name, save, rsph=1.E+0, pert=True):
 
     ttic = time.time()
     hdel, info = gcrotmk(
-        trsk.cell_del2_sums, vrhs, tol=1.E-8, m=50, k=25)
+        trsk.cell_del2_sums, vrhs, 
+            tol=1.E-8, atol=1.E-8, m=50, k=25)
     ttoc = time.time()
    #print(ttoc - ttic)    
     
@@ -231,7 +232,7 @@ def init(name, save, rsph=1.E+0, pert=True):
 
     print(init)
 
-    init.to_netcdf(save, format="NETCDF3_64BIT_OFFSET")
+    init.to_netcdf(save, format="NETCDF4")
 
     return
 
@@ -251,12 +252,12 @@ if (__name__ == "__main__"):
 
     parser.add_argument(
         "--with-pert", dest="with_pert",
-        type=lambda x: bool(strtobool(x)),
-        required=True, help="True to add hh perturb.")
+        type=lambda x: bool(strtobool(str(x.strip()))),
+        required=True, help="True to add h perturbation.")
 
     parser.add_argument(
         "--radius", dest="radius", type=float,
-        required=True, help="Value of sphere_radius.")
+        required=True, help="Value of sphere_radius [m].")
 
     args = parser.parse_args()
 
