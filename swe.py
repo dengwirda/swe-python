@@ -36,9 +36,6 @@ def swe(cnfg):
     cnfg.pv_upwind = cnfg.pv_upwind.upper()
     cnfg.pv_scheme = cnfg.pv_scheme.upper()
     
-    cnfg.du_damp_4 = np.sqrt(cnfg.du_damp_4)
-    cnfg.vu_damp_4 = np.sqrt(cnfg.vu_damp_4)
-
     name = cnfg.mpas_file
     path, file = os.path.split(name)
     save = os.path.join(path, "out_" + file)
@@ -49,7 +46,7 @@ def swe(cnfg):
 
     # load mesh + init. conditions
     mesh = load_mesh(name)
-    flow = load_flow(name, None, lean=True)
+    flow = load_flow(name, mesh, lean=True)
 
     ttoc = time.time()
    #print(ttoc - ttic)
@@ -79,6 +76,8 @@ def swe(cnfg):
     ht_cell = h0_cell * 0.0
 
     hh_cell = np.maximum(HH_TINY, hh_cell)
+        
+    uu_edge[flow.uu_mask] = 0.0
 
     ttoc = time.time()
    #print(ttoc - ttic)
@@ -102,7 +101,7 @@ def swe(cnfg):
     flow.ff_cell*= (not cnfg.no_rotate)
     flow.ff_edge*= (not cnfg.no_rotate)
     flow.ff_vert*= (not cnfg.no_rotate)
-
+    
     kp_sums = np.zeros((
         cnfg.iteration // cnfg.stat_freq + 1), dtype=float)
     en_sums = np.zeros((
@@ -114,6 +113,9 @@ def swe(cnfg):
     print("Integrating:")
 
     ttic = time.time(); xout = []; next = 0; freq = 0
+    
+    cnfg.du_damp_4 = np.sqrt(cnfg.du_damp_4)
+    cnfg.vu_damp_4 = np.sqrt(cnfg.vu_damp_4)
 
     for step in range(0, cnfg.iteration + 1):
 
@@ -260,6 +262,13 @@ def init_file(name, cnfg, save, mesh, flow):
     data.sphere_radius = mesh.rsph
     data.is_periodic = "NO"
     data.source = "swe-python"
+    
+    for attr in vars(cnfg):  # add user-opts to output
+        vals = getattr(cnfg, attr)
+        if (vals is None): continue
+        if (type(vals) == list): continue
+        if (type(vals) == bool): vals = int(vals)
+        setattr (data, attr, vals)
 
     data.createDimension(
         "Time", cnfg.iteration // cnfg.save_freq + 1)
@@ -350,14 +359,22 @@ def init_file(name, cnfg, save, mesh, flow):
         "cellsOnVertex", "i4", ("nVertices", "vertexDegree"))
     data["cellsOnVertex"][:, :] = mesh.vert.cell
    
+    data.createVariable("is_mask", "i1", ("nCells"))
+    data["is_mask"].long_name = "TRUE for cells masked out of flow"
+    data["is_mask"][:] = flow.is_mask
+   
     data.createVariable("zb_cell", "f8", ("nCells"))
+    data["zb_cell"].long_name = "Elevation of bottom surface"
     data["zb_cell"][:] = flow.zb_cell
 
     data.createVariable("ff_cell", "f8", ("nCells"))
+    data["ff_cell"].long_name = "Coriolis parameter on cells"
     data["ff_cell"][:] = flow.ff_cell
     data.createVariable("ff_edge", "f8", ("nEdges"))
+    data["ff_edge"].long_name = "Coriolis parameter on edges"
     data["ff_edge"][:] = flow.ff_edge
     data.createVariable("ff_vert", "f8", ("nVertices"))
+    data["ff_vert"].long_name = "Coriolis parameter on duals"
     data["ff_vert"][:] = flow.ff_vert
 
     data.createVariable(
@@ -385,7 +402,7 @@ def init_file(name, cnfg, save, mesh, flow):
 
     data.createVariable(
         "zt_cell", "f4", ("Time", "nCells", "nVertLevels"))    
-    data["zt_cell"].long_name = "Top surface of layer on cells"
+    data["zt_cell"].long_name = "Elevation of top surface"
 
     data.createVariable(
         "du_cell", "f4", ("Time", "nCells", "nVertLevels"))    

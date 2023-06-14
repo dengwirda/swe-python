@@ -24,6 +24,8 @@ def rhs_fst_h(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
     
     if (cnfg.no_h_tend): uh_cell *= 0.
 
+    uh_cell[flow.is_mask] = 0.
+
     return uh_cell
 
 
@@ -85,6 +87,8 @@ def rhs_slw_u(mesh, trsk, flow, cnfg,
                 
     if (cnfg.no_u_tend): ru_edge *= 0.
     
+    ru_edge[flow.uu_mask] = 0.
+    
     return ru_edge, \
         ke_cell, ke_dual, ke_bias, \
         rv_cell, pv_cell, \
@@ -102,6 +106,8 @@ def rhs_fst_u(mesh, trsk, flow, cnfg,
     hz_grad = trsk.edge_grad_norm * hz_cell
     
     if (cnfg.no_u_tend): hz_grad *= 0.
+    
+    hz_grad[flow.uu_mask] = 0.
     
     return hz_grad
 

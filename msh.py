@@ -511,6 +511,7 @@ def load_flow(name, mesh=None, lean=False):
     flow.hh_cell = np.zeros((step, ncel, nlev), dtype=float)
 
     flow.zb_cell = np.zeros((ncel), dtype=float)
+    flow.is_mask = np.zeros((ncel), dtype=bool)
     flow.ff_cell = np.zeros((ncel), dtype=float)
     flow.ff_edge = np.zeros((nedg), dtype=float)
     flow.ff_vert = np.zeros((nvrt), dtype=float)
@@ -537,6 +538,19 @@ def load_flow(name, mesh=None, lean=False):
     if ("zb_cell" in data.variables.keys()):
         flow.zb_cell = np.array(data.variables["zb_cell"])
         
+    if ("is_mask" in data.variables.keys()):
+        flow.is_mask = np.array(data.variables["is_mask"])
+        
+    flow.uu_mask = np.logical_or.reduce((
+        flow.is_mask[mesh.edge.cell[:, 0] - 1],
+        flow.is_mask[mesh.edge.cell[:, 1] - 1]
+        ) )
+    flow.rv_mask = np.logical_or.reduce((
+        flow.is_mask[mesh.vert.cell[:, 0] - 1],
+        flow.is_mask[mesh.vert.cell[:, 1] - 1],
+        flow.is_mask[mesh.vert.cell[:, 2] - 1],
+        ) )
+        
     if ("ff_cell" in data.variables.keys()):
         flow.ff_cell = np.array(data.variables["ff_cell"])
     if ("ff_edge" in data.variables.keys()):
@@ -547,7 +561,7 @@ def load_flow(name, mesh=None, lean=False):
     if ("uu_edge" in data.variables.keys()):
         flow.uu_edge = np.array(data.variables["uu_edge"])
     
-    if (lean is True): return sort_flow(flow, mesh, lean)
+    if (lean is True): return flow
       
     flow.vv_edge = np.zeros((step, nedg, nlev), dtype=float)
 
@@ -580,7 +594,7 @@ def load_flow(name, mesh=None, lean=False):
     if ("pv_dual" in data.variables.keys()):
         flow.pv_dual = np.array(data.variables["pv_dual"])
 
-    return sort_flow(flow, mesh, lean)
+    return flow
     
     
 def sort_flow(flow, mesh=None, lean=False):
@@ -590,6 +604,10 @@ def sort_flow(flow, mesh=None, lean=False):
     flow.hh_cell = flow.hh_cell[:, mesh.cell.ifwd - 1, :]
 
     flow.zb_cell = flow.zb_cell[mesh.cell.ifwd - 1]
+    
+    flow.is_mask = flow.is_mask[mesh.cell.ifwd - 1]
+    flow.uu_mask = flow.uu_mask[mesh.edge.ifwd - 1]
+    flow.rv_mask = flow.rv_mask[mesh.vert.ifwd - 1]
 
     flow.ff_vert = flow.ff_vert[mesh.vert.ifwd - 1]
     flow.ff_edge = flow.ff_edge[mesh.edge.ifwd - 1]

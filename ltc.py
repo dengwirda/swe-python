@@ -10,7 +10,7 @@ from ops import trsk_mats
 # SWE test cases for linear wave problems
 # Authors: Darren Engwirda
 
-def init(name, save, rsph, case, xmid, ymid):
+def init(name, save, rsph, case, xmid, ymid, hmag):
 
 #------------------------------------ load an MPAS mesh file
 
@@ -30,15 +30,15 @@ def init(name, save, rsph, case, xmid, ymid):
     ymid = ymid * np.pi / 180.0
 
     if (case == 1): 
-        ltc1(name, save, rsph, mesh, trsk, xmid, ymid)
+        ltc1(name, save, rsph, mesh, trsk, xmid, ymid, hmag)
 
     if (case == 2): 
-        ltc2(name, save, rsph, mesh, trsk, xmid, ymid)
+        ltc2(name, save, rsph, mesh, trsk, xmid, ymid, hmag)
 
     return
 
 
-def ltc1(name, save, rsph, mesh, trsk, xmid, ymid):
+def ltc1(name, save, rsph, mesh, trsk, xmid, ymid, hmag):
 
 #-- simple isolated gravity-wave test-case
 
@@ -47,7 +47,7 @@ def ltc1(name, save, rsph, mesh, trsk, xmid, ymid):
 
     uu_edge = np.zeros(mesh.edge.size, dtype=np.float64)
 
-    hh_cell = np.exp(
+    hh_cell = hmag * np.exp(
             - 100. * (mesh.cell.xlon - xmid) ** 2 + \
             - 100. * (mesh.cell.ylat - ymid) ** 2 ) \
             + 500.0
@@ -106,7 +106,7 @@ def ltc1(name, save, rsph, mesh, trsk, xmid, ymid):
     return
 
 
-def ltc2(name, save, rsph, mesh, trsk, xmid, ymid):
+def ltc2(name, save, rsph, mesh, trsk, xmid, ymid, hmag):
 
 #-- earth-topography tsunami-wave test-case
 
@@ -126,11 +126,11 @@ def ltc2(name, save, rsph, mesh, trsk, xmid, ymid):
     zb_cell+= np.asarray(
         data["ice_thickness"][:], dtype=np.float64)
 
-    zb_cell = np.minimum(-10.0, zb_cell)  # not too shallow
+   #zb_cell = np.minimum(-10.0, zb_cell)  # not too shallow
 
     uu_edge = np.zeros(mesh.edge.size, dtype=np.float64)
 
-    hh_cell = -zb_cell + 5.0 * np.exp( -1.0 * (
+    hh_cell = -zb_cell + hmag * np.exp( -1. * (
             250. * (mesh.cell.xlon - xmid) ** 2 + \
             250. * (mesh.cell.ylat - ymid) ** 2
             ) ** 4 )
@@ -179,6 +179,8 @@ def ltc2(name, save, rsph, mesh, trsk, xmid, ymid):
         2.00E+00 * erot * np.sin(mesh.edge.ylat))
     init["fVertex"] = (("nVertices"),
         2.00E+00 * erot * np.sin(mesh.vert.ylat))
+        
+    init["is_mask"] = (("nCells"), zb_cell >= -10.0)
 
     print(init)
 
@@ -219,6 +221,12 @@ if (__name__ == "__main__"):
         default=+0.00,
         required=False, 
         help="Centre of wave in lat. direction [deg].")
+        
+    parser.add_argument(
+        "--wave-hmag", dest="wave_hmag", type=float,
+        default=+5.00,
+        required=False, 
+        help="Magnitude of wave surface deformation [m].")
 
     args = parser.parse_args()
 
@@ -227,4 +235,5 @@ if (__name__ == "__main__"):
          rsph=args.radius,
          case=args.test_case,
          xmid=args.wave_xmid,
-         ymid=args.wave_ymid)
+         ymid=args.wave_ymid,
+         hmag=args.wave_hmag)
