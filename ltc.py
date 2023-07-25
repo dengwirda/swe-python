@@ -17,7 +17,7 @@ def init(name, save, rsph, case, xmid, ymid, hmag):
     print("Loading the mesh file...")
 
     mesh = load_mesh(name, rsph)
-    
+
 #------------------------------------ build TRSK matrix op's
 
     print("Forming coefficients...")
@@ -29,10 +29,10 @@ def init(name, save, rsph, case, xmid, ymid, hmag):
     xmid = xmid * np.pi / 180.0
     ymid = ymid * np.pi / 180.0
 
-    if (case == 1): 
+    if (case == 1):
         ltc1(name, save, rsph, mesh, trsk, xmid, ymid, hmag)
 
-    if (case == 2): 
+    if (case == 2):
         ltc2(name, save, rsph, mesh, trsk, xmid, ymid, hmag)
 
     return
@@ -118,21 +118,42 @@ def ltc2(name, save, rsph, mesh, trsk, xmid, ymid, hmag):
     if ("bed_elevation" not in data.variables.keys()):
         raise ValueError("Elevation data not found.")
 
+    if ("ocn_cover" not in data.variables.keys()):
+        raise ValueError("Ocn.-mask data not found.")
+
     if ("ice_thickness" not in data.variables.keys()):
         raise ValueError("Elevation data not found.")
+
+    oc_mask = np.asarray(
+        data["ocn_cover"][:], dtype=np.float32)
 
     zb_cell = np.asarray(
         data["bed_elevation"][:], dtype=np.float64)
     zb_cell+= np.asarray(
         data["ice_thickness"][:], dtype=np.float64)
 
-   #zb_cell = np.minimum(-10.0, zb_cell)  # not too shallow
+    zb_cell[oc_mask >= 0.375] = \
+        np.minimum(-5.0, zb_cell[oc_mask >= 0.375])
 
     uu_edge = np.zeros(mesh.edge.size, dtype=np.float64)
 
+    """
     hh_cell = -zb_cell + hmag * np.exp( -1. * (
-            250. * (mesh.cell.xlon - xmid) ** 2 + \
-            250. * (mesh.cell.ylat - ymid) ** 2
+            250.0 * (mesh.cell.xlon - xmid) ** 2 + \
+            250.0 * (mesh.cell.ylat - ymid) ** 2
+            ) ** 4 )
+    """
+
+    """
+    hh_cell = -zb_cell + hmag * np.exp( -1. * (
+            25000 * (mesh.cell.xlon - xmid) ** 2 + \
+            250.0 * (mesh.cell.ylat - ymid) ** 2
+            ) ** 4 )
+    """
+
+    hh_cell = -zb_cell + hmag * np.exp( -1. * (
+            250.0 * (mesh.cell.xlon - xmid) ** 2 + \
+            50000 * (mesh.cell.ylat - ymid) ** 2
             ) ** 4 )
 
 #-- inject mesh with IC.'s and write output MPAS netCDF file
@@ -179,8 +200,8 @@ def ltc2(name, save, rsph, mesh, trsk, xmid, ymid, hmag):
         2.00E+00 * erot * np.sin(mesh.edge.ylat))
     init["fVertex"] = (("nVertices"),
         2.00E+00 * erot * np.sin(mesh.vert.ylat))
-        
-    init["is_mask"] = (("nCells"), zb_cell >= -10.0)
+
+    init["is_mask"] = (("nCells"), oc_mask<0.375)
 
     print(init)
 
@@ -213,19 +234,19 @@ if (__name__ == "__main__"):
     parser.add_argument(
         "--wave-xmid", dest="wave_xmid", type=float,
         default=+180.,
-        required=False, 
+        required=False,
         help="Centre of wave in lon. direction [deg].")
 
     parser.add_argument(
         "--wave-ymid", dest="wave_ymid", type=float,
         default=+0.00,
-        required=False, 
+        required=False,
         help="Centre of wave in lat. direction [deg].")
-        
+
     parser.add_argument(
         "--wave-hmag", dest="wave_hmag", type=float,
         default=+5.00,
-        required=False, 
+        required=False,
         help="Magnitude of wave surface deformation [m].")
 
     args = parser.parse_args()

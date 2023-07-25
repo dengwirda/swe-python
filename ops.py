@@ -67,10 +67,33 @@ def trsk_mats(mesh):
     # Authors: Darren Engwirda
 
     class base: pass
+    
+    trsk = base()
 
     ttic = time.time()
 
-    trsk = base()
+    # least-squares vector reconst. operators
+    trsk.dual_lsqr_xnrm, \
+    trsk.dual_lsqr_ynrm, \
+    trsk.dual_lsqr_znrm, \
+    trsk.dual_lsqr_xprp, \
+    trsk.dual_lsqr_yprp, \
+    trsk.dual_lsqr_zprp = dual_lsqr_fxyz(mesh)
+
+    trsk.cell_lsqr_xnrm, \
+    trsk.cell_lsqr_ynrm, \
+    trsk.cell_lsqr_znrm = cell_lsqr_fxyz(mesh)
+
+    trsk.edge_lsqr_xnrm, \
+    trsk.edge_lsqr_ynrm, \
+    trsk.edge_lsqr_znrm = edge_lsqr_fxyz(mesh)
+
+    ttoc = time.time()
+   #print("lsqr:", ttoc - ttic)
+
+    ttic = time.time()
+
+    # vector-calc. as sparse matrix operators 
    #trsk.cell_edge_sign = cell_edge_sign(mesh)
    #trsk.dual_edge_sign = dual_edge_sign(mesh)
 
@@ -109,27 +132,6 @@ def trsk_mats(mesh):
 
     ttoc = time.time()
    #print("mats:", ttoc - ttic)
-    
-    ttic = time.time()
-
-    # least-squares vector reconstruction operators
-    trsk.dual_lsqr_xnrm, \
-    trsk.dual_lsqr_ynrm, \
-    trsk.dual_lsqr_znrm, \
-    trsk.dual_lsqr_xprp, \
-    trsk.dual_lsqr_yprp, \
-    trsk.dual_lsqr_zprp = dual_lsqr_fxyz(mesh)
-
-    trsk.cell_lsqr_xnrm, \
-    trsk.cell_lsqr_ynrm, \
-    trsk.cell_lsqr_znrm = cell_lsqr_fxyz(mesh)
-
-    trsk.edge_lsqr_xnrm, \
-    trsk.edge_lsqr_ynrm, \
-    trsk.edge_lsqr_znrm = edge_lsqr_fxyz(mesh)
-
-    ttoc = time.time()
-   #print("lsqr:", ttoc - ttic)
     
     ttic = time.time()
 
@@ -214,31 +216,6 @@ def trsk_mats(mesh):
    #print("reco:", ttoc - ttic)
    
     return trsk
-
-
-def cell_edge_sign(mesh):
-
-    sign = np.zeros((mesh.cell.size, 
-        np.max(mesh.cell.topo)), dtype=np.int32)
-
-    for edge in range(np.max(mesh.cell.topo)):
-
-        mask = mesh.cell.topo > edge
-
-        cidx = np.argwhere(mask).ravel()
-
-        vidx = mesh.cell.vert[mask, edge] - 1
-        eidx = mesh.cell.edge[mask, edge] - 1
-
-        v1st = mesh.edge.vert[eidx, 0] - 1
-
-        okay = vidx != v1st
-        flip = vidx == v1st
-
-        sign[cidx[okay], edge] = +1
-        sign[cidx[flip], edge] = -1
-
-    return sign
 
 
 def cell_flux_sums(mesh):
@@ -524,29 +501,6 @@ def edge_flux_perp(mesh):
     return csr_matrix((xvec, (ivec, jvec)))
 
 
-def dual_edge_sign(mesh):
-
-    sign = np.zeros(
-        (mesh.vert.size, 3), dtype=np.int32)
-
-    for edge in range(3):
-
-        vidx = np.arange(0, mesh.vert.size)
-
-        eidx = mesh.vert.edge[:, edge] - 1
-        cidx = mesh.vert.cell[:, edge] - 1
-
-        c1st = mesh.edge.cell[eidx, 0] - 1
-
-        okay = cidx != c1st
-        flip = cidx == c1st
-
-        sign[okay, edge] = +1
-        sign[flip, edge] = -1
-
-    return sign
-
-
 def dual_flux_sums(mesh):
 
     xvec = np.array([], dtype=np.float64)
@@ -717,6 +671,8 @@ def dual_lsqr_mats(mesh):
     matA = np.transpose(Amat, axes=(1, 0, 2))
     matB = np.transpose(Bmat, axes=(1, 0, 2))
 
+    del ndir; del pdir; del dnrm
+
     Rmat = np.einsum(
         "ik..., kj... -> ij...", matA, Amat)
     Smat = np.einsum(
@@ -845,6 +801,8 @@ def cell_lsqr_mats(mesh):
         Amat[edge,    :, mask] = edir[eidx]
     
     Amat[-1, :, :] = np.transpose(cnrm)
+    
+    del edir; del cnrm
 
     matA = np.transpose(Amat, axes=(1, 0, 2))
 
@@ -960,6 +918,8 @@ def edge_lsqr_mats(mesh):
     
     Amat[-1, :, :] = np.transpose(enrm)
     Bmat[-1, :, :] = np.transpose(enrm)
+    
+    del ndir; del pdir; del enrm
     
     matA = np.transpose(Amat, axes=(1, 0, 2))
     matB = np.transpose(Bmat, axes=(1, 0, 2))

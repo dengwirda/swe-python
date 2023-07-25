@@ -18,7 +18,7 @@ from msh import load_mesh, load_flow, \
 from ops import trsk_mats
 
 from _dx import HH_TINY, UU_TINY
-from _dx import invariant, diag_vars, tcpu
+from _dx import invariant, diag_vars, scalingVk, tcpu
 from _dt import step_eqns
 
 def swe(cnfg):
@@ -31,6 +31,7 @@ def swe(cnfg):
     cnfg.integrate = cnfg.integrate.upper()
     cnfg.operators = cnfg.operators.upper()
     cnfg.equations = cnfg.equations.upper()
+    cnfg.hh_scheme = cnfg.hh_scheme.upper()
     cnfg.ke_upwind = cnfg.ke_upwind.upper()
     cnfg.ke_scheme = cnfg.ke_scheme.upper()
     cnfg.pv_upwind = cnfg.pv_upwind.upper()
@@ -102,10 +103,10 @@ def swe(cnfg):
     flow.ff_edge*= (not cnfg.no_rotate)
     flow.ff_vert*= (not cnfg.no_rotate)
     
-    kp_sums = np.zeros((
-        cnfg.iteration // cnfg.stat_freq + 1), dtype=float)
-    en_sums = np.zeros((
-        cnfg.iteration // cnfg.stat_freq + 1), dtype=float)
+    kp_sums = np.zeros((cnfg.iteration 
+            // cnfg.stat_freq + 1), dtype=float)
+    en_sums = np.zeros((cnfg.iteration 
+            // cnfg.stat_freq + 1), dtype=float)
 
     ttoc = time.time()
    #print(ttoc - ttic)
@@ -114,8 +115,30 @@ def swe(cnfg):
 
     ttic = time.time(); xout = []; next = 0; freq = 0
     
+    mesh.cell.mask = flow.is_mask
+    mesh.edge.mask = flow.uu_mask
+    mesh.vert.mask = flow.rv_mask
+    
+    cnfg.du_damp_k = \
+        max (cnfg.du_damp_2, cnfg.du_damp_4)
+    cnfg.vu_damp_k = \
+        max (cnfg.vu_damp_2, cnfg.vu_damp_4)
+    cnfg.vh_damp_k = \
+        max (cnfg.vh_damp_2, cnfg.vh_damp_4)
+    
+    s2_edge, s4_edge,\
+    s2_cell, s4_cell = scalingVk(mesh, trsk, cnfg)
+    
+    cnfg.du_damp_2*= s2_edge
+    cnfg.du_damp_4*= s4_edge
+    cnfg.vu_damp_2*= s2_edge
+    cnfg.vu_damp_4*= s4_edge
+    cnfg.vh_damp_2*= s2_cell
+    cnfg.vh_damp_4*= s4_cell
+    
     cnfg.du_damp_4 = np.sqrt(cnfg.du_damp_4)
     cnfg.vu_damp_4 = np.sqrt(cnfg.vu_damp_4)
+    cnfg.vh_damp_4 = np.sqrt(cnfg.vh_damp_4)
 
     for step in range(0, cnfg.iteration + 1):
 
@@ -142,6 +165,7 @@ def swe(cnfg):
 
         if (step % cnfg.save_freq == 0):
 
+            hh_edge, hh_dual, \
             ke_cell, ke_dual, \
             rv_cell, pv_cell, \
             rv_dual, pv_dual, \
@@ -150,6 +174,8 @@ def swe(cnfg):
 
             data = nc.Dataset(
                 save, "a", format="NETCDF4")
+                
+            # xt variables are tmp scratch
 
             data.variables["uu_edge"][freq, :, :] = \
                 np.reshape(uu_edge[
@@ -158,31 +184,39 @@ def swe(cnfg):
                 np.reshape(hh_cell[
                     mesh.cell.irev - 1], (1, mesh.cell.size, 1))
 
-            zt_cell = flow.zb_cell + hh_cell
+            xt_cell = flow.zb_cell + hh_cell
 
             data.variables["zt_cell"][freq, :, :] = \
-                np.reshape(zt_cell[
+                np.reshape(xt_cell[
                     mesh.cell.irev - 1], (1, mesh.cell.size, 1))
 
-            du_cell = trsk.cell_flux_sums * uu_edge
-            du_cell/= mesh.cell.area
+            xt_cell = trsk.cell_flux_sums * uu_edge
+            xt_cell/= mesh.cell.area
 
             data.variables["du_cell"][freq, :, :] = \
-                np.reshape(du_cell[
+                np.reshape(xt_cell[
                     mesh.cell.irev - 1], (1, mesh.cell.size, 1))
 
-            up_dual = trsk.dual_stub_sums * ke_bias
-            up_dual = up_dual / mesh.vert.area
+            xt_edge = uu_edge * hh_edge
+            xt_cell = trsk.cell_flux_sums * xt_edge
+            xt_cell/= mesh.cell.area
+
+            data.variables["uh_cell"][freq, :, :] = \
+                np.reshape(xt_cell[
+                    mesh.cell.irev - 1], (1, mesh.cell.size, 1))
+
+            xt_dual = trsk.dual_stub_sums * ke_bias
+            xt_dual/= mesh.vert.area
 
             data.variables["ke_bias"][freq, :, :] = \
-                np.reshape(up_dual[
+                np.reshape(xt_dual[
                     mesh.vert.irev - 1], (1, mesh.vert.size, 1))
 
-            up_dual = trsk.dual_stub_sums * pv_bias
-            up_dual = up_dual / mesh.vert.area
+            xt_dual = trsk.dual_stub_sums * pv_bias
+            xt_dual/= mesh.vert.area
 
             data.variables["pv_bias"][freq, :, :] = \
-                np.reshape(up_dual[
+                np.reshape(xt_dual[
                     mesh.vert.irev - 1], (1, mesh.vert.size, 1))
 
             data.variables["ke_cell"][freq, :, :] = \
@@ -246,6 +280,7 @@ def swe(cnfg):
     print("tcpu.computeVV:", tcpu.computeVV)
     print("tcpu.computeDU:", tcpu.computeDU)
     print("tcpu.computeVU:", tcpu.computeVU)
+    print("tcpu.computeVH:", tcpu.computeVH)
     print("tcpu.computeCd:", tcpu.computeCd)
 
     data = nc.Dataset(save, "a", format="NETCDF4")
@@ -405,9 +440,14 @@ def init_file(name, cnfg, save, mesh, flow):
     data["zt_cell"].long_name = "Elevation of top surface"
 
     data.createVariable(
-        "du_cell", "f4", ("Time", "nCells", "nVertLevels"))    
+        "du_cell", "f4", ("Time", "nCells", "nVertLevels"))
     data["du_cell"].long_name = \
         "Divergence of velocity on cells"
+        
+    data.createVariable(
+        "uh_cell", "f4", ("Time", "nCells", "nVertLevels"))
+    data["uh_cell"].long_name = \
+        "Divergence of thickness flux on cells"
 
     data.createVariable(
         "ke_bias", "f4", ("Time", "nVertices", "nVertLevels"))
@@ -487,8 +527,13 @@ if (__name__ == "__main__"):
         "--equations", dest="equations", type=str,
         default="shallow-water",
         required=False,
-        help="Eqn. selection = " + 
-             "{shallow-water}, madsen-sorensen.")
+        help="Eqn. selection = {shallow-water}.")
+        
+    parser.add_argument(
+        "--hh-scheme", dest="hh_scheme", type=str,
+        default="CENTRE",
+        required=False, 
+        help="HH.-flux formulation = {UPWIND}, CENTRE.")
 
     parser.add_argument(
         "--pv-upwind", dest="pv_upwind", type=str,
@@ -544,58 +589,76 @@ if (__name__ == "__main__"):
                                      "UPWIND+SKINNY.")
 
     parser.add_argument(
+        "--dx-damp-r", dest="dx_damp_r", type=float,
+        default=30.E+3,
+        required=False,
+        help="Ref-len. for viscosity scaling {DX = 30E+3}.")
+        
+    parser.add_argument(
+        "--vh-damp-2", dest="vh_damp_2", type=float,
+        default=0.E+00,
+        required=False,
+        help="DEL^2(H) damping coeff. {DAMP = +0.E+00}.")
+
+    parser.add_argument(
+        "--vh-damp-4", dest="vh_damp_4", type=float,
+        default=0.E+00,
+        required=False,
+        help="DEL^4(H) damping coeff. {DAMP = +0.E+00}.")
+
+    parser.add_argument(
         "--du-damp-2", dest="du_damp_2", type=float,
         default=0.E+00,
         required=False,
-        help="DIV^2 damping coeff. {DAMP = +0.E+00}.")
+        help="DIV^2(U) damping coeff. {DAMP = +0.E+00}.")
 
     parser.add_argument(
         "--du-damp-4", dest="du_damp_4", type=float,
         default=0.E+00,
         required=False,
-        help="DIV^4 damping coeff. {DAMP = +0.E+00}.")
+        help="DIV^4(U) damping coeff. {DAMP = +0.E+00}.")
 
     parser.add_argument(
         "--vu-damp-2", dest="vu_damp_2", type=float,
         default=0.E+00,
         required=False,
-        help="DEL^2 damping coeff. {DAMP = +0.E+00}.")
+        help="DEL^2(U) damping coeff. {DAMP = +0.E+00}.")
 
     parser.add_argument(
         "--vu-damp-4", dest="vu_damp_4", type=float,
         default=0.E+00,
         required=False,
-        help="DEL^4 damping coeff. {DAMP = +0.E+00}.")
+        help="DEL^4(U) damping coeff. {DAMP = +0.E+00}.")
         
     parser.add_argument(
         "--vu-du-mul", dest="vu_du_mul", type=float,
         default=1.E+00,
         required=False,
-        help="DEL^k div. amplifier {MUL. = +1.E+00}.")
+        help="DEL^k(U) div. amplifier {MUL. = +1.E+00}.")
 
     parser.add_argument(
         "--loglaw-z0", dest="loglaw_z0", type=float,
         default=0.E+00,
         required=False,
-        help="Log-law roughness-len. {Z0 = +0.E+00}.")
+        help="Log-law roughness length {Z0 = +0.E+00}.")
 
     parser.add_argument(
         "--loglaw-lo", dest="loglaw_lo", type=float,
         default=0.E+00,
         required=False,
-        help="Log-law min. cd coeff. {Cd > +0.E+00}.")
+        help="Log-law minimum Cd coeff. {Cd > +0.E+00}.")
 
     parser.add_argument(
         "--loglaw-hi", dest="loglaw_hi", type=float,
         default=0.E+00,
         required=False,
-        help="Log-law max. cd coeff. {Cd < +0.E+00}.")
+        help="Log-law maximum Cd coeff. {Cd < +0.E+00}.")
 
     parser.add_argument(
         "--operators", dest="operators", type=str,
         default="TRSK-CV",
         required=False, 
-        help="Discretisation = {TRSK-CV}, TRSK-MD.")
+        help="Spatial operators: {TRSK-CV}, TRSK-MD.")
 
     parser.add_argument(
         "--save-freq", dest="save_freq", type=int,

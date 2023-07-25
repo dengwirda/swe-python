@@ -6,11 +6,11 @@ import numpy as np
 """
 #-- Darren Engwirda
 
-HH_TINY        = 1.0E-08
+HH_TINY        = 1.0E-04
 HH_THIN        = 1.0E+02
 UU_TINY        = 1.0E-12
 PV_TINY        = 1.0E-16
-KE_TINY        = 1.0E-04
+KE_TINY        = 1.0E-08
 
 LH_BIAS        = 2.0/3.0    # lo-hi flux bias
 
@@ -26,6 +26,7 @@ tcpu.advect_PV = 0.0E+00
 tcpu.computeVV = 0.0E+00
 tcpu.computeDU = 0.0E+00
 tcpu.computeVU = 0.0E+00
+tcpu.computeVH = 0.0E+00
 tcpu.computeDW = 0.0E+00
 tcpu.computeCd = 0.0E+00
 
@@ -64,9 +65,11 @@ def diag_vars(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
         ff_dual, ff_edge, ff_cell, 
         +0.0 * cnfg.time_step)
 
-    return ke_cell, ke_dual, \
+    return hh_edge, hh_dual, \
+           ke_cell, ke_dual, \
            rv_cell, pv_cell, \
-           rv_dual, pv_dual, ke_bias, pv_bias
+           rv_dual, pv_dual, \
+           ke_bias, pv_bias
 
 
 def invariant(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
@@ -290,6 +293,20 @@ def compute_H(mesh, trsk, cnfg, hh_cell, uu_edge):
 
         hh_edge = trsk.edge_cell_sums * hh_cell
         hh_edge*= 0.5E+00
+        
+    if (cnfg.hh_scheme == "UPWIND" ):
+
+        hh_grad = trsk.edge_grad_norm * hh_cell
+
+        hh_wind = hh_edge - 0.5 * \
+            np.sign(uu_edge) * mesh.edge.clen * hh_grad
+
+        hh_bias = hh_edge / HH_THIN - 0.50
+        hh_bias = np.minimum(1.,
+                  np.maximum(0., hh_bias))
+
+        hh_edge = \
+            hh_bias * hh_edge + (1.- hh_bias) * hh_wind
 
     ttoc = time.time()
     tcpu.compute_H = tcpu.compute_H + (ttoc - ttic)
@@ -598,12 +615,33 @@ def computeVV(mesh, trsk, cnfg, uu_edge):
     return vv_edge
 
 
+def scalingVk(mesh, trsk, cnfg):
+
+#-- local scaling for div^k and del^k operators
+
+    dx_edge = mesh.edge.dlen
+    dx_dual = trsk.dual_edge_sums * dx_edge / 3.
+    
+    dx_cell = trsk.cell_vert_sums * dx_dual
+    dx_cell/= mesh.cell.topo
+
+    s2_cell = (dx_cell / cnfg.dx_damp_r) ** 1
+    s4_cell = (dx_cell / cnfg.dx_damp_r) ** 3
+    
+    dx_edge = trsk.edge_cell_sums * dx_cell / 2.
+
+    s2_edge = (dx_edge / cnfg.dx_damp_r) ** 1
+    s4_edge = (dx_edge / cnfg.dx_damp_r) ** 3
+
+    return s2_edge, s4_edge, \
+           s2_cell, s4_cell
+
+
 def computeDU(mesh, trsk, cnfg, uu_edge):
 
 #-- damping div^k operators
 
-    if (cnfg.du_damp_2 == 0 and 
-        cnfg.du_damp_4 == 0):
+    if (cnfg.du_damp_k == 0):
         return np.zeros(mesh.edge.size, dtype=float)
 
     ttic = time.time()
@@ -624,7 +662,7 @@ def computeDU(mesh, trsk, cnfg, uu_edge):
     
 #-- D^4 = vk * grad(div(D^2))              
     d4_edge = trsk.edge_grad_norm * du_cell
-    d4_edge*= cnfg.vu_damp_4        # NB. sqrt(vk)
+    d4_edge*= cnfg.du_damp_4        # NB. sqrt(vk)
     
     ttoc = time.time()
     tcpu.computeDU = tcpu.computeDU + (ttoc - ttic)
@@ -636,8 +674,7 @@ def computeVU(mesh, trsk, cnfg, uu_edge):
 
 #-- viscous del^k operators
 
-    if (cnfg.vu_damp_2 == 0 and 
-        cnfg.vu_damp_4 == 0):
+    if (cnfg.vu_damp_k == 0):
         return np.zeros(mesh.edge.size, dtype=float)
 
     ttic = time.time()
@@ -678,6 +715,41 @@ def computeVU(mesh, trsk, cnfg, uu_edge):
     tcpu.computeVU = tcpu.computeVU + (ttoc - ttic)
 
     return v2_edge - v4_edge
+    
+    
+def computeVH(mesh, trsk, cnfg, hh_cell, zb_cell):
+
+#-- diffusive del^k operators
+
+    if (cnfg.vh_damp_k == 0):
+        return np.zeros(mesh.cell.size, dtype=float)
+
+    ttic = time.time()
+    
+    hz_cell = hh_cell + zb_cell
+    hz_edge = trsk.edge_grad_norm * hz_cell
+    
+    hz_edge[mesh.edge.mask] = 0.
+    
+    hz_cell = trsk.cell_flux_sums * hz_edge
+    hz_cell/= mesh.cell.area
+    
+    v2_cell = cnfg.vh_damp_2 * hz_cell
+    v4_cell = cnfg.vh_damp_4 * hz_cell
+    
+    hz_edge = trsk.edge_grad_norm * v4_cell
+    
+    hz_edge[mesh.edge.mask] = 0.
+    
+    v4_cell = trsk.cell_flux_sums * hz_edge
+    v4_cell/= mesh.cell.area
+    
+    v4_cell*= cnfg.vh_damp_4        # NB. sqrt(vk)
+    
+    ttoc = time.time()
+    tcpu.computeVH = tcpu.computeVH + (ttoc - ttic)
+
+    return v2_cell - v4_cell
 
 
 def computeCd(mesh, trsk, cnfg, hh_cell, uu_edge):
@@ -709,36 +781,5 @@ def computeCd(mesh, trsk, cnfg, hh_cell, uu_edge):
 
     return cd_edge * np.sqrt(2. * ke_edge) / hh_edge
 
-
-def computeMS(mesh, trsk, cnfg, 
-              hh_cell, uu_edge, ht_cell, ut_edge):
-
-#-- "dispersive wave" terms
-
-    ttic = time.time()
-
-    hh_dual, \
-    hh_edge = compute_H(mesh, trsk, cnfg, hh_cell, uu_edge)
-
-#-- 1/2 * h * grad(div(du/dt * h))
-    uh_edge = ut_edge * hh_edge
-
-    uh_cell = trsk.cell_flux_sums * uh_edge
-    uh_cell/= mesh.cell.area
-
-    d1_edge = trsk.edge_grad_norm * uh_cell
-    d1_edge*= hh_edge / 2.0
-
-#-- 1/6 * h^2 * grad(div(du/dt)) 
-    ut_cell = trsk.cell_flux_sums * ut_edge
-    ut_cell/= mesh.cell.area
-
-    d2_edge = trsk.edge_grad_norm * ut_cell
-    d2_edge*= hh_edge ** 2 / 6.0
-    
-    ttoc = time.time()
-    tcpu.computeDW = tcpu.computeDW + (ttoc - ttic)
-
-    return d1_edge - d2_edge
 
 

@@ -8,8 +8,8 @@ import numpy as np
 
 from _dx import computeCd
 from _dx import tcpu
-from rhs import rhs_all_u, rhs_all_h, \
-                rhs_slw_u, rhs_fst_u, rhs_fst_h
+from rhs import rhs_all_u, rhs_slw_u, rhs_fst_u, \
+                rhs_all_h, rhs_slw_h, rhs_fst_h
 
 def step_eqns(mesh, trsk, flow, cnfg, 
               hh_cell, uu_edge,     # state
@@ -17,7 +17,7 @@ def step_eqns(mesh, trsk, flow, cnfg,
 
 #-- operator splitting for drag terms
 
-    BIAS = 5.0 / 9.0  # theta method centre
+    BIAS = 5.0 / 8.0  # theta method centre
 
     if (cnfg.loglaw_z0 > 0.):
     #-- 1st part of bot. drag strang splits
@@ -142,10 +142,7 @@ def step_RK22(mesh, trsk, flow, cnfg,
     hb_cell = h1_cell * (0.0 + 1.0 * BETA) + \
               hh_cell * (1.0 - 1.0 * BETA)
 
-    ru_edge, \
-    ke_cell, ke_dual, ke_bias, \
-    rv_cell, pv_cell, \
-    rv_dual, pv_dual, pv_bias = rhs_all_u(
+    ru_edge = rhs_all_u(
         mesh, trsk, flow, cnfg, 
             hb_cell, uu_edge, ht_cell, ut_edge)
 
@@ -190,10 +187,7 @@ def step_RK22(mesh, trsk, flow, cnfg,
               h1_cell * (0.5 - 0.5 * BETA) + \
               hh_cell * (0.5)
 
-    ru_edge, \
-    ke_cell, ke_dual, ke_bias, \
-    rv_cell, pv_cell, \
-    rv_dual, pv_dual, pv_bias = rhs_all_u(
+    ru_edge = rhs_all_u(
         mesh, trsk, flow, cnfg, 
             hb_cell, um_edge, ht_cell, ut_edge)
 
@@ -248,10 +242,7 @@ def step_RK32(mesh, trsk, flow, cnfg,
     hb_cell = h1_cell * (0.0 + 1.0 * BETA) + \
               hh_cell * (1.0 - 1.0 * BETA)
 
-    ru_edge, \
-    ke_cell, ke_dual, ke_bias, \
-    rv_cell, pv_cell, \
-    rv_dual, pv_dual, pv_bias = rhs_all_u(
+    ru_edge = rhs_all_u(
         mesh, trsk, flow, cnfg, 
             hb_cell, uu_edge, ht_cell, ut_edge)
 
@@ -300,10 +291,7 @@ def step_RK32(mesh, trsk, flow, cnfg,
     hb_cell = hb_cell * (0.0 + 1.0 * isFB) + \
               h1_cell * (1.0 - 1.0 * isFB)
 
-    ru_edge, \
-    ke_cell, ke_dual, ke_bias, \
-    rv_cell, pv_cell, \
-    rv_dual, pv_dual, pv_bias = rhs_all_u(
+    ru_edge = rhs_all_u(
         mesh, trsk, flow, cnfg, 
             hb_cell, u1_edge, ht_cell, ut_edge)
 
@@ -345,10 +333,7 @@ def step_RK32(mesh, trsk, flow, cnfg,
               h2_cell * (1.0 - 2.0 * BETA) + \
               hh_cell * (0.0 + 1.0 * BETA)
 
-    ru_edge, \
-    ke_cell, ke_dual, ke_bias, \
-    rv_cell, pv_cell, \
-    rv_dual, pv_dual, pv_bias = rhs_all_u(
+    ru_edge = rhs_all_u(
         mesh, trsk, flow, cnfg, 
             hb_cell, u2_edge, ht_cell, ut_edge)
 
@@ -451,10 +436,19 @@ def slow_RK32(mesh, trsk, flow, cnfg,
 
     ttic = time.time()
 
-    ru_edge, \
-    ke_cell, ke_dual, ke_bias, \
-    rv_cell, pv_cell, \
-    rv_dual, pv_dual, pv_bias = rhs_slw_u(
+    rh_cell = rhs_slw_h(
+        mesh, trsk, flow, cnfg, hh_cell, uu_edge)
+
+    h1_cell = (
+        hh_cell - 1.0 / 3.0 * cnfg.time_step * rh_cell
+    )
+
+    ttoc = time.time()
+    tcpu.thickness = tcpu.thickness + (ttoc - ttic)
+
+    ttic = time.time()
+
+    ru_edge = rhs_slw_u(
         mesh, trsk, flow, cnfg, 
             hh_cell, uu_edge, ht_cell, ut_edge)
 
@@ -469,12 +463,21 @@ def slow_RK32(mesh, trsk, flow, cnfg,
 
     ttic = time.time()
 
-    ru_edge, \
-    ke_cell, ke_dual, ke_bias, \
-    rv_cell, pv_cell, \
-    rv_dual, pv_dual, pv_bias = rhs_slw_u(
+    rh_cell = rhs_slw_h(
+        mesh, trsk, flow, cnfg, h1_cell, u1_edge)
+
+    h2_cell = (
+        hh_cell - 1.0 / 2.0 * cnfg.time_step * rh_cell
+    )
+
+    ttoc = time.time()
+    tcpu.thickness = tcpu.thickness + (ttoc - ttic)
+
+    ttic = time.time()
+
+    ru_edge = rhs_slw_u(
         mesh, trsk, flow, cnfg, 
-            hh_cell, u1_edge, ht_cell, ut_edge)
+            h1_cell, u1_edge, ht_cell, ut_edge)
 
     u2_edge = (
         uu_edge - 1.0 / 2.0 * cnfg.time_step * ru_edge
@@ -487,12 +490,21 @@ def slow_RK32(mesh, trsk, flow, cnfg,
 
     ttic = time.time()
 
-    ru_edge, \
-    ke_cell, ke_dual, ke_bias, \
-    rv_cell, pv_cell, \
-    rv_dual, pv_dual, pv_bias = rhs_slw_u(
+    rh_cell = rhs_slw_h(
+        mesh, trsk, flow, cnfg, h2_cell, u2_edge)
+
+    h3_cell = (
+        hh_cell - 1.0 / 1.0 * cnfg.time_step * rh_cell
+    )
+
+    ttoc = time.time()
+    tcpu.thickness = tcpu.thickness + (ttoc - ttic)
+
+    ttic = time.time()
+
+    ru_edge = rhs_slw_u(
         mesh, trsk, flow, cnfg, 
-            hh_cell, u2_edge, ht_cell, ut_edge)
+            h2_cell, u2_edge, ht_cell, ut_edge)
 
     u3_edge = (
         uu_edge - 1.0 / 1.0 * cnfg.time_step * ru_edge
@@ -501,7 +513,7 @@ def slow_RK32(mesh, trsk, flow, cnfg,
     ttoc = time.time()
     tcpu.momentum_ = tcpu.momentum_ + (ttoc - ttic)
 
-    return hh_cell, u3_edge, ht_cell, ut_edge
+    return h3_cell, u3_edge, ht_cell, ut_edge
 
 
 def fast_RK32(mesh, trsk, flow, cnfg,
@@ -677,10 +689,7 @@ def step_SP33(mesh, trsk, flow, cnfg,
 
     ttic = time.time()
 
-    ru_edge, \
-    ke_cell, ke_dual, ke_bias, \
-    rv_cell, pv_cell, \
-    rv_dual, pv_dual, pv_bias = rhs_all_u(
+    ru_edge = rhs_all_u(
         mesh, trsk, flow, cnfg, 
             hh_cell, uu_edge, ht_cell, ut_edge)
 
@@ -711,10 +720,7 @@ def step_SP33(mesh, trsk, flow, cnfg,
 
     ttic = time.time()
 
-    ru_edge, \
-    ke_cell, ke_dual, ke_bias, \
-    rv_cell, pv_cell, \
-    rv_dual, pv_dual, pv_bias = rhs_all_u(
+    ru_edge = rhs_all_u(
         mesh, trsk, flow, cnfg, 
             h1_cell, u1_edge, ht_cell, ut_edge)
 
@@ -747,10 +753,7 @@ def step_SP33(mesh, trsk, flow, cnfg,
 
     ttic = time.time()
 
-    ru_edge, \
-    ke_cell, ke_dual, ke_bias, \
-    rv_cell, pv_cell, \
-    rv_dual, pv_dual, pv_bias = rhs_all_u(
+    ru_edge = rhs_all_u(
         mesh, trsk, flow, cnfg, 
             h2_cell, u2_edge, ht_cell, ut_edge)
 
@@ -795,10 +798,7 @@ def step_RK44(mesh, trsk, flow, cnfg,
 
     ttic = time.time()
 
-    ru1_edge, \
-    ke_cell, ke_dual, ke_bias, \
-    rv_cell, pv_cell, \
-    rv_dual, pv_dual, pv_bias = rhs_all_u(
+    ru1_edge = rhs_all_u(
         mesh, trsk, flow, cnfg, 
             hh_cell, uu_edge, ht_cell, ut_edge)
     
@@ -827,10 +827,7 @@ def step_RK44(mesh, trsk, flow, cnfg,
 
     ttic = time.time()
 
-    ru2_edge, \
-    ke_cell, ke_dual, ke_bias, \
-    rv_cell, pv_cell, \
-    rv_dual, pv_dual, pv_bias = rhs_all_u(
+    ru2_edge = rhs_all_u(
         mesh, trsk, flow, cnfg, 
             h1_cell, u1_edge, ht_cell, ut_edge)
     
@@ -857,10 +854,7 @@ def step_RK44(mesh, trsk, flow, cnfg,
 
     ttic = time.time()
 
-    ru3_edge, \
-    ke_cell, ke_dual, ke_bias, \
-    rv_cell, pv_cell, \
-    rv_dual, pv_dual, pv_bias = rhs_all_u(
+    ru3_edge = rhs_all_u(
         mesh, trsk, flow, cnfg, 
             h2_cell, u2_edge, ht_cell, ut_edge)
     
@@ -881,8 +875,8 @@ def step_RK44(mesh, trsk, flow, cnfg,
     h4_cell = (
         hh_cell - 1.0 / 6.0 * cnfg.time_step * (
             rh1_cell + 
-            2 * rh2_cell + 
-            2 * rh3_cell +
+            rh2_cell * 2 + 
+            rh3_cell * 2 +
             rh4_cell
         )
     )
@@ -894,18 +888,15 @@ def step_RK44(mesh, trsk, flow, cnfg,
 
     ttic = time.time()
 
-    ru4_edge, \
-    ke_cell, ke_dual, ke_bias, \
-    rv_cell, pv_cell, \
-    rv_dual, pv_dual, pv_bias = rhs_all_u(
+    ru4_edge = rhs_all_u(
         mesh, trsk, flow, cnfg, 
             h3_cell, u3_edge, ht_cell, ut_edge)
     
     u4_edge = ( 
         uu_edge - 1.0 / 6.0 * cnfg.time_step * (
             ru1_edge +
-            2 * ru2_edge +
-            2 * ru3_edge +
+            ru2_edge * 2 +
+            ru3_edge * 2 +
             ru4_edge
         )
     )

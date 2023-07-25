@@ -6,13 +6,28 @@ import numpy as np
 #-- Darren Engwirda
 
 from _dx import tcpu, \
-                compute_H, computePV, \
-                computeKE, advect_PV, \
-                computeVV, \
-                computeDU, computeVU, \
-                computeMS
+    compute_H, computePV, \
+    computeKE, advect_PV, computeVV, \
+    computeDU, computeVU, computeVH
+
+def rhs_slw_h(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
+
+#-- evaluate slow tendencies dH/dt = RHS(t,U,H)
+
+    zb_cell = flow.zb_cell
+
+    vh_cell =-computeVH(mesh, trsk, cnfg, hh_cell, zb_cell)
+    
+    if (cnfg.no_h_tend): vh_cell *= 0.
+
+    vh_cell[mesh.cell.mask] = 0.
+
+    return vh_cell
+
 
 def rhs_fst_h(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
+
+#-- evaluate fast tendencies dH/dt = RHS(t,U,H)
 
     hh_dual, \
     hh_edge = compute_H(mesh, trsk, cnfg, hh_cell, uu_edge)
@@ -24,19 +39,29 @@ def rhs_fst_h(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
     
     if (cnfg.no_h_tend): uh_cell *= 0.
 
-    uh_cell[flow.is_mask] = 0.
+    uh_cell[mesh.cell.mask] = 0.
 
     return uh_cell
 
 
 def rhs_all_h(mesh, trsk, flow, cnfg, hh_cell, uu_edge):
-    return \
-    rhs_fst_h(mesh, trsk, flow, cnfg, hh_cell, uu_edge)
+    
+#-- evaluate full tendencies dH/dt = RHS(t,U,H)
+    
+    rh_cell = rhs_fst_h(
+        mesh, trsk, flow, cnfg, hh_cell, uu_edge)
+        
+    rh_cell+= rhs_slw_h(
+        mesh, trsk, flow, cnfg, hh_cell, uu_edge)
+        
+    return rh_cell
 
 
 def rhs_slw_u(mesh, trsk, flow, cnfg, 
               hh_cell, uu_edge,
               ht_cell, ut_edge):
+    
+#-- evaluate slow tendencies dU/dt = RHS(t,U,H)
     
     ff_cell = flow.ff_cell
     ff_edge = flow.ff_edge
@@ -76,28 +101,22 @@ def rhs_slw_u(mesh, trsk, flow, cnfg,
     
     uu_damp+= computeVU(mesh, trsk, cnfg, uu_edge)
 
-    if (cnfg.equations in "MADSEN-SORENSEN"):
-        dw_edge = computeMS(
-            mesh, trsk, cnfg, 
-                hh_cell, uu_edge, ht_cell, ut_edge)
-                
     ru_edge = (
         ke_grad + qh_flux - uu_damp - dw_edge
     )
                 
     if (cnfg.no_u_tend): ru_edge *= 0.
     
-    ru_edge[flow.uu_mask] = 0.
+    ru_edge[mesh.edge.mask] = 0.
     
-    return ru_edge, \
-        ke_cell, ke_dual, ke_bias, \
-        rv_cell, pv_cell, \
-        rv_dual, pv_dual, pv_bias
+    return ru_edge
 
 
 def rhs_fst_u(mesh, trsk, flow, cnfg, 
               hh_cell, uu_edge,
               ht_cell, ut_edge):
+
+#-- evaluate fast tendencies dU/dt = RHS(t,U,H)
 
     zb_cell = flow.zb_cell
 
@@ -107,7 +126,7 @@ def rhs_fst_u(mesh, trsk, flow, cnfg,
     
     if (cnfg.no_u_tend): hz_grad *= 0.
     
-    hz_grad[flow.uu_mask] = 0.
+    hz_grad[mesh.edge.mask] = 0.
     
     return hz_grad
 
@@ -116,20 +135,16 @@ def rhs_all_u(mesh, trsk, flow, cnfg,
               hh_cell, uu_edge,
               ht_cell, ut_edge):
 
-    fu_edge = rhs_fst_u(
+#-- evaluate full tendencies dU/dt = RHS(t,U,H)
+
+    ru_edge = rhs_fst_u(
         mesh, trsk, flow, cnfg, 
             hh_cell, uu_edge, ht_cell, ut_edge)
 
-    su_edge, \
-    ke_cell, ke_dual, ke_bias, \
-    rv_cell, pv_cell, \
-    rv_dual, pv_dual, pv_bias = rhs_slw_u(
+    ru_edge+= rhs_slw_u(
         mesh, trsk, flow, cnfg, 
             hh_cell, uu_edge, ht_cell, ut_edge)
 
-    return fu_edge + su_edge, \
-        ke_cell, ke_dual, ke_bias, \
-        rv_cell, pv_cell, \
-        rv_dual, pv_dual, pv_bias
+    return ru_edge
 
 
